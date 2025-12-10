@@ -59,8 +59,8 @@ export default function App() {
           setOriginalUrl(event.target.result);
           setSettings({
             smoothness: 0,
-            brightness: 100,
-            contrast: 100,
+            brightness: 100,  
+            contrast: 100,    
             filterId: 'none', 
             showTimestamp: false
           });
