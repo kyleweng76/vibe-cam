@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { 
   Download, 
+  Share, // 新增分享圖示
   Wand2, 
   Sliders, 
   Image as ImageIcon, 
@@ -12,7 +13,7 @@ import {
   Sun 
 } from 'lucide-react';
 
-// 濾鏡定義 (升級版：加入 colorOverlay 疊色參數)
+// 濾鏡定義 (暴力增強版：針對手機螢幕優化)
 const FILTERS = [
   { 
     id: 'none', 
@@ -25,44 +26,45 @@ const FILTERS = [
     id: 'film', 
     name: '經典底片', 
     icon: <Aperture size={18}/>, 
-    // 加強對比與暖色偏移
-    filter: 'contrast(120%) saturate(130%) sepia(20%) brightness(105%)',
-    // 關鍵：疊加暖橘色讓膚色更通透
-    overlay: { color: 'rgba(255, 190, 100, 0.15)', mode: 'soft-light' }
+    // 對比度 120% -> 130%, 飽和度 130% -> 145%
+    filter: 'contrast(130%) saturate(145%) sepia(25%) brightness(105%) hue-rotate(-5deg)',
+    // 疊色加重：0.15 -> 0.3
+    overlay: { color: 'rgba(255, 180, 80, 0.3)', mode: 'soft-light' }
   },
   { 
     id: 'ccd', 
     name: 'CCD相機', 
     icon: <Zap size={18}/>, 
-    // 高對比、高飽和、稍微偏冷
-    filter: 'contrast(140%) saturate(140%) brightness(115%) hue-rotate(5deg)',
-    // 關鍵：疊加藍紫色製造電子感
-    overlay: { color: 'rgba(100, 100, 255, 0.15)', mode: 'overlay' }
+    // 對比度 140% -> 150%, 增加銳利感
+    filter: 'contrast(150%) saturate(140%) brightness(115%) hue-rotate(5deg)',
+    // 疊色加重：藍紫色 0.15 -> 0.35 (更明顯的電子冷感)
+    overlay: { color: 'rgba(80, 80, 255, 0.35)', mode: 'overlay' }
   },
   { 
     id: 'movie', 
     name: '電影感', 
     icon: <Clapperboard size={18}/>, 
-    // 降低飽和度，偏移色相製造青橙色調
-    filter: 'contrast(125%) saturate(85%) sepia(15%) hue-rotate(170deg) brightness(95%)',
-    // 關鍵：疊加深青色製造電影氛圍
-    overlay: { color: 'rgba(0, 50, 80, 0.3)', mode: 'overlay' }
+    // 壓低亮度，增加青色偏移
+    filter: 'contrast(130%) saturate(90%) sepia(20%) hue-rotate(170deg) brightness(90%)',
+    // 疊色加重：0.3 -> 0.45 (強烈的青色氛圍)
+    overlay: { color: 'rgba(0, 60, 90, 0.45)', mode: 'overlay' }
   },
   { 
     id: 'soft', 
     name: '奶油柔光', 
     icon: <Sun size={18}/>, 
-    // 低對比、高亮度
-    filter: 'brightness(110%) contrast(90%) saturate(90%)',
-    // 關鍵：疊加白色製造朦朧感
-    overlay: { color: 'rgba(255, 255, 255, 0.2)', mode: 'screen' }
+    // 降低對比，大幅提亮
+    filter: 'brightness(120%) contrast(85%) saturate(85%)',
+    // 疊色加重：0.2 -> 0.35 (更強的霧面感)
+    overlay: { color: 'rgba(255, 255, 255, 0.35)', mode: 'screen' }
   },
   { 
     id: 'bw_vogue', 
     name: '時尚黑白', 
     icon: <Aperture size={18}/>, 
-    filter: 'grayscale(100%) contrast(150%) brightness(105%)',
-    overlay: { color: 'rgba(20, 20, 20, 0.1)', mode: 'multiply' }
+    // 極致高對比黑白
+    filter: 'grayscale(100%) contrast(160%) brightness(110%)',
+    overlay: { color: 'rgba(20, 20, 20, 0.15)', mode: 'multiply' }
   },
 ];
 
@@ -87,7 +89,6 @@ export default function App() {
   const canvasRef = useRef(null);
   const fileInputRef = useRef(null);
 
-  // 預設載入時不選濾鏡
   useEffect(() => {}, [image, activeTab]);
 
   const handleImageUpload = (e) => {
@@ -99,7 +100,6 @@ export default function App() {
         img.onload = () => {
           setImage(img);
           setOriginalUrl(event.target.result);
-          // 載入新圖片時重置
           setSettings({
             smoothness: 0,
             brightness: 100,  
@@ -116,6 +116,49 @@ export default function App() {
     }
   };
 
+  // 將 DataURL 轉換為 File 物件 (用於分享)
+  const dataURLtoFile = (dataurl, filename) => {
+    const arr = dataurl.split(',');
+    const mime = arr[0].match(/:(.*?);/)[1];
+    const bstr = atob(arr[1]);
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    while(n--){
+        u8arr[n] = bstr.charCodeAt(n);
+    }
+    return new File([u8arr], filename, {type:mime});
+  }
+
+  // 新增：處理儲存/分享邏輯
+  const handleSave = async () => {
+    if (!processedUrl) return;
+
+    // 嘗試使用原生分享 (Web Share API)
+    if (navigator.share && navigator.canShare) {
+      try {
+        const file = dataURLtoFile(processedUrl, `vibe-cam-${Date.now()}.jpg`);
+        const shareData = {
+          files: [file],
+          title: 'Vibe Cam Photo',
+          text: 'Check out my photo from Vibe Cam!'
+        };
+
+        if (navigator.canShare(shareData)) {
+          await navigator.share(shareData);
+          return; // 如果分享成功，就結束
+        }
+      } catch (err) {
+        console.log('Share failed, falling back to download', err);
+      }
+    }
+
+    // 降級方案：如果瀏覽器不支援分享 (如電腦版 Chrome)，則執行下載
+    const link = document.createElement('a');
+    link.download = `vibe-cam-${Date.now()}.jpg`;
+    link.href = processedUrl;
+    link.click();
+  };
+
   const addGrain = (ctx, width, height, type) => {
     const grainCanvas = document.createElement('canvas');
     grainCanvas.width = width / 2; 
@@ -127,7 +170,6 @@ export default function App() {
     const len = buffer32.length;
 
     const isCCD = type === 'ccd';
-    // CCD 雜訊更重更銳利
     const intensity = isCCD ? 60 : 30; 
 
     for (let i = 0; i < len; i++) {
@@ -135,7 +177,6 @@ export default function App() {
              const value = Math.random() * intensity; 
              const alpha = (Math.random() * 25 + 10) | 0; 
              let r = value, g = value, b = value;
-             // CCD 彩色噪點
              if (isCCD && Math.random() > 0.6) {
                 if (Math.random() > 0.5) r += 30; else b += 40;
              }
@@ -169,7 +210,6 @@ export default function App() {
     ctx.font = `bold ${fontSize}px ${isCCD ? '"Verdana", sans-serif' : '"Courier New", monospace'}`;
     ctx.fillStyle = isCCD ? '#aaffff' : '#ff9500'; 
     
-    // 增加陰影讓字更明顯
     ctx.shadowColor = 'rgba(0,0,0,0.8)';
     ctx.shadowBlur = 4;
     ctx.shadowOffsetX = 2;
@@ -200,7 +240,6 @@ export default function App() {
     let newContrast = 100;
     let resultText = "";
 
-    // 簡單的 AI 邏輯
     if (avgBrightness < 70) {
       newBrightness = 130; 
       resultText = "低光補償 +30%";
@@ -253,14 +292,10 @@ export default function App() {
     }
 
     ctx.clearRect(0, 0, width, height);
-    
-    // 1. 繪製原圖
     ctx.drawImage(image, 0, 0, width, height);
 
     const currentFilter = FILTERS.find(f => f.id === settings.filterId);
     
-    // 2. 特殊效果：柔光 (Soft Glow) 
-    // 不管選什麼濾鏡，只要有 smoothness 或是 'soft' 濾鏡都加一點發光
     if (settings.filterId === 'soft' || settings.smoothness > 0) {
         const offCanvas = document.createElement('canvas');
         offCanvas.width = Math.floor(width / 4); 
@@ -268,7 +303,6 @@ export default function App() {
         const offCtx = offCanvas.getContext('2d');
         offCtx.drawImage(image, 0, 0, offCanvas.width, offCanvas.height);
         
-        // 強度
         const blurAmount = settings.filterId === 'soft' ? '15px' : '5px';
         const brightAmount = settings.filterId === 'soft' ? '130%' : '110%';
         offCtx.filter = `blur(${blurAmount}) brightness(${brightAmount})`; 
@@ -281,8 +315,6 @@ export default function App() {
         ctx.restore();
     }
 
-    // 3. 全局調色 (Canvas Filter + Color Overlay)
-    // 3.1 先應用 CSS Filter 字串
     const filterString = `brightness(${settings.brightness}%) contrast(${settings.contrast}%) ${currentFilter.filter !== 'none' ? currentFilter.filter : ''}`;
     
     const tempCanvas = document.createElement('canvas');
@@ -296,7 +328,6 @@ export default function App() {
     ctx.drawImage(tempCanvas, 0, 0);
     ctx.restore();
 
-    // 3.2 應用 Color Overlay (這一步是產生風格的關鍵！)
     if (currentFilter.overlay) {
       ctx.save();
       ctx.globalCompositeOperation = currentFilter.overlay.mode;
@@ -305,12 +336,10 @@ export default function App() {
       ctx.restore();
     }
 
-    // 4. 雜訊 (Grain)
     if (['film', 'ccd', 'bw_vogue'].includes(settings.filterId)) {
       addGrain(ctx, width, height, settings.filterId);
     }
 
-    // 5. 時間戳記
     if (settings.showTimestamp) {
       addTimestamp(ctx, width, height);
     }
@@ -379,17 +408,12 @@ export default function App() {
         </div>
         
         <button 
-          onClick={() => {
-            if (processedUrl) {
-              const link = document.createElement('a');
-              link.download = `vibe-cam-${Date.now()}.jpg`;
-              link.href = processedUrl;
-              link.click();
-            }
-          }}
-          className="bg-white text-black px-5 py-1.5 rounded-full text-xs font-bold tracking-wide hover:bg-neutral-200 transition-colors"
+          onClick={handleSave}
+          className="bg-white text-black px-5 py-1.5 rounded-full text-xs font-bold tracking-wide hover:bg-neutral-200 transition-colors flex items-center gap-2"
         >
-          SAVE
+          {/* 在電腦上是下載，在手機上會變成分享圖示 */}
+          {navigator.share ? <Share size={14} /> : <Download size={14} />}
+          {navigator.share ? 'SHARE' : 'SAVE'}
         </button>
       </div>
 
@@ -500,7 +524,6 @@ export default function App() {
                         {f.icon}
                      </div>
                      
-                     {/* 預覽時疊加一層顏色讓使用者知道效果 */}
                      {f.overlay && (
                        <div 
                         className="absolute inset-0 pointer-events-none" 
