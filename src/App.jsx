@@ -12,14 +12,58 @@ import {
   Sun 
 } from 'lucide-react';
 
-// 濾鏡定義
+// 濾鏡定義 (升級版：加入 colorOverlay 疊色參數)
 const FILTERS = [
-  { id: 'none', name: '原圖', icon: <ImageIcon size={18}/>, filter: 'none' },
-  { id: 'film', name: '經典底片', icon: <Aperture size={18}/>, filter: 'sepia(25%) saturate(140%) contrast(115%) brightness(105%) hue-rotate(-10deg)' },
-  { id: 'ccd', name: 'CCD相機', icon: <Zap size={18}/>, filter: 'contrast(130%) saturate(110%) brightness(110%) hue-rotate(5deg)' }, 
-  { id: 'movie', name: '電影感', icon: <Clapperboard size={18}/>, filter: 'sepia(20%) contrast(110%) saturate(120%) hue-rotate(190deg) brightness(95%)' }, 
-  { id: 'soft', name: '奶油柔光', icon: <Sun size={18}/>, filter: 'brightness(115%) contrast(90%) saturate(90%) sepia(10%)' }, 
-  { id: 'bw_vogue', name: '時尚黑白', icon: <Aperture size={18}/>, filter: 'grayscale(100%) contrast(130%) brightness(105%)' },
+  { 
+    id: 'none', 
+    name: '原圖', 
+    icon: <ImageIcon size={18}/>, 
+    filter: 'none',
+    overlay: null 
+  },
+  { 
+    id: 'film', 
+    name: '經典底片', 
+    icon: <Aperture size={18}/>, 
+    // 加強對比與暖色偏移
+    filter: 'contrast(120%) saturate(130%) sepia(20%) brightness(105%)',
+    // 關鍵：疊加暖橘色讓膚色更通透
+    overlay: { color: 'rgba(255, 190, 100, 0.15)', mode: 'soft-light' }
+  },
+  { 
+    id: 'ccd', 
+    name: 'CCD相機', 
+    icon: <Zap size={18}/>, 
+    // 高對比、高飽和、稍微偏冷
+    filter: 'contrast(140%) saturate(140%) brightness(115%) hue-rotate(5deg)',
+    // 關鍵：疊加藍紫色製造電子感
+    overlay: { color: 'rgba(100, 100, 255, 0.15)', mode: 'overlay' }
+  },
+  { 
+    id: 'movie', 
+    name: '電影感', 
+    icon: <Clapperboard size={18}/>, 
+    // 降低飽和度，偏移色相製造青橙色調
+    filter: 'contrast(125%) saturate(85%) sepia(15%) hue-rotate(170deg) brightness(95%)',
+    // 關鍵：疊加深青色製造電影氛圍
+    overlay: { color: 'rgba(0, 50, 80, 0.3)', mode: 'overlay' }
+  },
+  { 
+    id: 'soft', 
+    name: '奶油柔光', 
+    icon: <Sun size={18}/>, 
+    // 低對比、高亮度
+    filter: 'brightness(110%) contrast(90%) saturate(90%)',
+    // 關鍵：疊加白色製造朦朧感
+    overlay: { color: 'rgba(255, 255, 255, 0.2)', mode: 'screen' }
+  },
+  { 
+    id: 'bw_vogue', 
+    name: '時尚黑白', 
+    icon: <Aperture size={18}/>, 
+    filter: 'grayscale(100%) contrast(150%) brightness(105%)',
+    overlay: { color: 'rgba(20, 20, 20, 0.1)', mode: 'multiply' }
+  },
 ];
 
 export default function App() {
@@ -27,7 +71,6 @@ export default function App() {
   const [processedUrl, setProcessedUrl] = useState(null);
   const [originalUrl, setOriginalUrl] = useState(null);
   
-  // 編輯參數狀態
   const [settings, setSettings] = useState({
     smoothness: 0,    
     brightness: 100,  
@@ -44,9 +87,8 @@ export default function App() {
   const canvasRef = useRef(null);
   const fileInputRef = useRef(null);
 
-  useEffect(() => {
-    // 預設行為
-  }, [image, activeTab]);
+  // 預設載入時不選濾鏡
+  useEffect(() => {}, [image, activeTab]);
 
   const handleImageUpload = (e) => {
     const file = e.target.files[0];
@@ -57,6 +99,7 @@ export default function App() {
         img.onload = () => {
           setImage(img);
           setOriginalUrl(event.target.result);
+          // 載入新圖片時重置
           setSettings({
             smoothness: 0,
             brightness: 100,  
@@ -84,14 +127,17 @@ export default function App() {
     const len = buffer32.length;
 
     const isCCD = type === 'ccd';
+    // CCD 雜訊更重更銳利
+    const intensity = isCCD ? 60 : 30; 
 
     for (let i = 0; i < len; i++) {
-        if (Math.random() < 0.8) {
-             const value = Math.random() * (isCCD ? 60 : 40); 
-             const alpha = (Math.random() * (isCCD ? 15 : 20) + 10) | 0; 
+        if (Math.random() < 0.85) {
+             const value = Math.random() * intensity; 
+             const alpha = (Math.random() * 25 + 10) | 0; 
              let r = value, g = value, b = value;
-             if (isCCD && Math.random() > 0.7) {
-                if (Math.random() > 0.5) r += 20; else b += 20;
+             // CCD 彩色噪點
+             if (isCCD && Math.random() > 0.6) {
+                if (Math.random() > 0.5) r += 30; else b += 40;
              }
              buffer32[i] = (alpha << 24) | (b << 16) | (g << 8) | r;
         }
@@ -101,7 +147,7 @@ export default function App() {
 
     ctx.save();
     ctx.globalCompositeOperation = 'overlay';
-    ctx.globalAlpha = isCCD ? 0.4 : 0.5; 
+    ctx.globalAlpha = isCCD ? 0.35 : 0.45; 
     ctx.drawImage(grainCanvas, 0, 0, width, height);
     ctx.restore();
   };
@@ -115,18 +161,21 @@ export default function App() {
     const isCCD = settings.filterId === 'ccd';
     const dateStr = isCCD ? `${year}/${month}/${day}` : `'${year.toString().slice(-2)} ${month} ${day}`;
     
-    const fontSize = Math.max(20, width * 0.035);
-    const padding = width * 0.05;
+    const fontSize = Math.max(24, width * 0.04);
+    const paddingX = width * 0.06;
+    const paddingY = height * 0.05;
 
     ctx.save();
     ctx.font = `bold ${fontSize}px ${isCCD ? '"Verdana", sans-serif' : '"Courier New", monospace'}`;
     ctx.fillStyle = isCCD ? '#aaffff' : '#ff9500'; 
-    ctx.shadowColor = '#000000';
-    ctx.shadowBlur = 2;
-    ctx.shadowOffsetX = 1;
-    ctx.shadowOffsetY = 1;
     
-    ctx.fillText(dateStr, width - ctx.measureText(dateStr).width - padding, height - padding);
+    // 增加陰影讓字更明顯
+    ctx.shadowColor = 'rgba(0,0,0,0.8)';
+    ctx.shadowBlur = 4;
+    ctx.shadowOffsetX = 2;
+    ctx.shadowOffsetY = 2;
+    
+    ctx.fillText(dateStr, width - ctx.measureText(dateStr).width - paddingX, height - paddingY);
     ctx.restore();
   };
 
@@ -151,27 +200,25 @@ export default function App() {
     let newContrast = 100;
     let resultText = "";
 
-    if (avgBrightness < 80) {
-      newBrightness = 125; 
-      resultText = "偵測到低光環境 🌙";
-    } else if (avgBrightness > 200) {
-      newBrightness = 90;  
-      resultText = "偵測到過度曝光 ☀️";
+    // 簡單的 AI 邏輯
+    if (avgBrightness < 70) {
+      newBrightness = 130; 
+      resultText = "低光補償 +30%";
+    } else if (avgBrightness > 210) {
+      newBrightness = 85;  
+      resultText = "高光抑制 -15%";
     } else {
       newBrightness = 105; 
-      resultText = "光線良好 ✨";
+      resultText = "智能校色完成";
     }
 
     if (settings.filterId === 'ccd') {
-      newContrast = 120;
-      resultText += " | 強化 CCD 電子感";
+      newContrast = 125;
     } else if (settings.filterId === 'soft') {
-      newContrast = 90;
+      newContrast = 95;
       newBrightness += 5;
-      resultText += " | 優化柔光氛圍";
     } else {
       newContrast = 110;
-      resultText += " | 自動校正色調";
     }
 
     setSettings(prev => ({
@@ -195,7 +242,6 @@ export default function App() {
     let width = image.width;
     let height = image.height;
 
-    // 計算最佳尺寸 (保持整數以避免亞像素渲染問題)
     if (width > MAX_WIDTH) {
       height = Math.floor((height * MAX_WIDTH) / width);
       width = MAX_WIDTH;
@@ -213,24 +259,30 @@ export default function App() {
 
     const currentFilter = FILTERS.find(f => f.id === settings.filterId);
     
-    // 2. 特殊效果疊層
-    if (settings.filterId === 'soft') {
+    // 2. 特殊效果：柔光 (Soft Glow) 
+    // 不管選什麼濾鏡，只要有 smoothness 或是 'soft' 濾鏡都加一點發光
+    if (settings.filterId === 'soft' || settings.smoothness > 0) {
         const offCanvas = document.createElement('canvas');
         offCanvas.width = Math.floor(width / 4); 
         offCanvas.height = Math.floor(height / 4);
         const offCtx = offCanvas.getContext('2d');
         offCtx.drawImage(image, 0, 0, offCanvas.width, offCanvas.height);
-        offCtx.filter = 'blur(10px) brightness(150%)'; 
+        
+        // 強度
+        const blurAmount = settings.filterId === 'soft' ? '15px' : '5px';
+        const brightAmount = settings.filterId === 'soft' ? '130%' : '110%';
+        offCtx.filter = `blur(${blurAmount}) brightness(${brightAmount})`; 
         offCtx.drawImage(offCanvas, 0, 0); 
 
         ctx.save();
         ctx.globalCompositeOperation = 'screen'; 
-        ctx.globalAlpha = 0.5;
+        ctx.globalAlpha = settings.filterId === 'soft' ? 0.6 : 0.3;
         ctx.drawImage(offCanvas, 0, 0, width, height);
         ctx.restore();
     }
 
-    // 3. 全局調色
+    // 3. 全局調色 (Canvas Filter + Color Overlay)
+    // 3.1 先應用 CSS Filter 字串
     const filterString = `brightness(${settings.brightness}%) contrast(${settings.contrast}%) ${currentFilter.filter !== 'none' ? currentFilter.filter : ''}`;
     
     const tempCanvas = document.createElement('canvas');
@@ -244,7 +296,16 @@ export default function App() {
     ctx.drawImage(tempCanvas, 0, 0);
     ctx.restore();
 
-    // 4. 雜訊
+    // 3.2 應用 Color Overlay (這一步是產生風格的關鍵！)
+    if (currentFilter.overlay) {
+      ctx.save();
+      ctx.globalCompositeOperation = currentFilter.overlay.mode;
+      ctx.fillStyle = currentFilter.overlay.color;
+      ctx.fillRect(0, 0, width, height);
+      ctx.restore();
+    }
+
+    // 4. 雜訊 (Grain)
     if (['film', 'ccd', 'bw_vogue'].includes(settings.filterId)) {
       addGrain(ctx, width, height, settings.filterId);
     }
@@ -332,7 +393,7 @@ export default function App() {
         </button>
       </div>
 
-      {/* Main Preview (Fixed Cropping Issue) */}
+      {/* Main Preview */}
       <div className="flex-1 relative flex items-center justify-center overflow-hidden bg-neutral-900/50 p-4">
         {processedUrl ? (
           <div 
@@ -354,7 +415,6 @@ export default function App() {
                 )}
              </div>
 
-            {/* 修正：加入 max-w-full 避免橫圖被裁切 */}
             <img 
               src={isComparing ? originalUrl : processedUrl} 
               alt="Preview" 
@@ -439,6 +499,14 @@ export default function App() {
                      <div className="absolute inset-0 bg-black/20 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                         {f.icon}
                      </div>
+                     
+                     {/* 預覽時疊加一層顏色讓使用者知道效果 */}
+                     {f.overlay && (
+                       <div 
+                        className="absolute inset-0 pointer-events-none" 
+                        style={{ backgroundColor: f.overlay.color, mixBlendMode: f.overlay.mode }} 
+                       />
+                     )}
                   </div>
                   <span className={`text-[10px] font-bold uppercase tracking-wide ${settings.filterId === f.id ? 'text-white' : 'text-neutral-600'}`}>
                     {f.name}
