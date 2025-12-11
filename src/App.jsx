@@ -16,8 +16,7 @@ import {
   CircleDot,
   Smartphone,
   Cpu,
-  Eraser,
-  Trash2,
+  User, // 美顏圖示
   Check
 } from 'lucide-react';
 
@@ -101,7 +100,11 @@ export default function App() {
   const [originalUrl, setOriginalUrl] = useState(null);
   
   const [settings, setSettings] = useState({
-    smoothness: 0,    
+    // 美顏參數
+    beautyLevel: 0, // 0-100, 預設 0 (關閉)
+    skinTone: 0,    // 0-100 (美白)
+    
+    // 全局參數
     brightness: 100,  
     contrast: 100,    
     filterId: 'none',
@@ -114,16 +117,9 @@ export default function App() {
   const [isComparing, setIsComparing] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [aiAnalysisResult, setAiAnalysisResult] = useState(''); 
-  
-  // 移除功能相關狀態
-  const [removeMaskPoints, setRemoveMaskPoints] = useState([]); // 存儲塗抹路徑
-  const [isDrawingMask, setIsDrawingMask] = useState(false);
-  const [brushSize, setBrushSize] = useState(20);
 
   const canvasRef = useRef(null);
   const fileInputRef = useRef(null);
-  const maskCanvasRef = useRef(null); // 用於顯示紅色塗抹遮罩
-  const imgRef = useRef(null); // 用於獲取圖片顯示尺寸
 
   const handleImageUpload = (e) => {
     const file = e.target.files[0];
@@ -135,7 +131,8 @@ export default function App() {
           setImage(img);
           setOriginalUrl(event.target.result);
           setSettings({
-            smoothness: 0,
+            beautyLevel: 0,
+            skinTone: 0,
             brightness: 100,  
             contrast: 100,    
             filterId: 'none', 
@@ -143,7 +140,6 @@ export default function App() {
             effectId: 'none',
             effectIntensity: 70
           });
-          setRemoveMaskPoints([]);
           setActiveTab('filters');
         };
         img.src = event.target.result;
@@ -176,185 +172,6 @@ export default function App() {
     }
   };
 
-  // --- 移除功能核心邏輯 ---
-
-  // 1. 處理塗抹動作
-  const handleTouchStart = (e) => {
-    if (activeTab !== 'remove') return;
-    setIsDrawingMask(true);
-    const point = getEventPoint(e);
-    if (point) setRemoveMaskPoints(prev => [...prev, point]);
-  };
-
-  const handleTouchMove = (e) => {
-    if (activeTab !== 'remove' || !isDrawingMask) return;
-    e.preventDefault(); // 防止滾動
-    const point = getEventPoint(e);
-    if (point) setRemoveMaskPoints(prev => [...prev, point]);
-  };
-
-  const handleTouchEnd = () => {
-    setIsDrawingMask(false);
-    // 加入一個分隔點，代表一筆畫結束 (可選，目前簡單處理)
-    setRemoveMaskPoints(prev => [...prev, null]);
-  };
-
-  // 獲取觸控/滑鼠相對圖片的座標
-  const getEventPoint = (e) => {
-    if (!imgRef.current) return null;
-    const rect = imgRef.current.getBoundingClientRect();
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-    
-    // 計算相對座標 (0-1)
-    const x = (clientX - rect.left) / rect.width;
-    const y = (clientY - rect.top) / rect.height;
-    
-    if (x < 0 || x > 1 || y < 0 || y > 1) return null;
-    return { x, y };
-  };
-
-  // 2. 繪製紅色遮罩 (在 UI 層)
-  useEffect(() => {
-    if (activeTab === 'remove' && maskCanvasRef.current && imgRef.current) {
-        const canvas = maskCanvasRef.current;
-        const ctx = canvas.getContext('2d');
-        const rect = imgRef.current.getBoundingClientRect();
-        
-        // 設定 Canvas 大小與圖片顯示大小一致
-        canvas.width = rect.width;
-        canvas.height = rect.height;
-        
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        
-        if (removeMaskPoints.length > 0) {
-            ctx.lineCap = 'round';
-            ctx.lineJoin = 'round';
-            ctx.strokeStyle = 'rgba(255, 50, 50, 0.5)';
-            ctx.lineWidth = brushSize;
-            
-            ctx.beginPath();
-            let isFirst = true;
-            
-            removeMaskPoints.forEach(p => {
-                if (!p) {
-                    isFirst = true;
-                    return; // 筆畫中斷
-                }
-                const px = p.x * canvas.width;
-                const py = p.y * canvas.height;
-                
-                if (isFirst) {
-                    ctx.moveTo(px, py);
-                    isFirst = false;
-                } else {
-                    ctx.lineTo(px, py);
-                }
-            });
-            ctx.stroke();
-        }
-    }
-  }, [removeMaskPoints, activeTab, brushSize, processedUrl]); // processedUrl 變更時重繪(例如縮放)
-
-  // 3. 執行智慧移除 (Inpainting Algorithm)
-  const applySmartRemove = async () => {
-    if (removeMaskPoints.length === 0 || !canvasRef.current) return;
-    
-    setIsProcessing(true);
-    setAiAnalysisResult('AI 運算修復中...');
-    
-    // 讓 UI 有機會渲染 Loading
-    await new Promise(r => setTimeout(r, 100));
-
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    const width = canvas.width;
-    const height = canvas.height;
-
-    // 1. 建立遮罩層 (在記憶體中)
-    const maskCanvas = document.createElement('canvas');
-    maskCanvas.width = width;
-    maskCanvas.height = height;
-    const maskCtx = maskCanvas.getContext('2d');
-    
-    maskCtx.lineCap = 'round';
-    maskCtx.lineJoin = 'round';
-    maskCtx.lineWidth = (brushSize / imgRef.current.width) * width; // 轉換筆刷大小比例
-    maskCtx.strokeStyle = '#FFFFFF'; // 白色為遮罩
-    
-    maskCtx.beginPath();
-    let isFirst = true;
-    removeMaskPoints.forEach(p => {
-        if (!p) { isFirst = true; return; }
-        const px = p.x * width;
-        const py = p.y * height;
-        if (isFirst) { maskCtx.moveTo(px, py); isFirst = false; }
-        else { maskCtx.lineTo(px, py); }
-    });
-    maskCtx.stroke();
-
-    // 2. 執行簡易 Inpainting (Pixel Diffusion)
-    // 这是一个簡化的算法：將原始圖片模糊後，填入遮罩區域，並加入雜訊
-    const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = width;
-    tempCanvas.height = height;
-    const tCtx = tempCanvas.getContext('2d');
-    
-    // 繪製原圖
-    tCtx.drawImage(canvas, 0, 0);
-    
-    // 多次模糊取樣 (模擬擴散)
-    ctx.save();
-    // 使用 maskCanvas 作為裁切路徑
-    ctx.globalCompositeOperation = 'source-over';
-    
-    // 這是一個視覺欺騙法：
-    // 我們從遮罩邊緣向內取樣 (或是簡單地用模糊背景填補)
-    // 1. 強力高斯模糊背景 (模擬平均色)
-    tCtx.filter = 'blur(20px)';
-    tCtx.drawImage(canvas, 0, 0); 
-    
-    // 2. 將模糊後的圖，只畫在遮罩區域 (使用 destination-in 或 clip)
-    // 這裡我們直接在主 Canvas 上操作
-    
-    // 繪製遮罩區域
-    const maskData = maskCtx.getImageData(0, 0, width, height).data;
-    const imgData = ctx.getImageData(0, 0, width, height);
-    const blurredData = tCtx.getImageData(0, 0, width, height).data;
-    
-    // 像素級操作 (這比 filter 更精準)
-    for (let i = 0; i < maskData.length; i += 4) {
-        // 如果是遮罩區域 (白色)
-        if (maskData[i] > 0) {
-            // 替換為模糊後的像素 (簡單修補)
-            imgData.data[i] = blurredData[i];     // R
-            imgData.data[i+1] = blurredData[i+1]; // G
-            imgData.data[i+2] = blurredData[i+2]; // B
-            
-            // 加入一點雜訊以模擬紋理，不然會太糊
-            const noise = (Math.random() - 0.5) * 20;
-            imgData.data[i] = Math.min(255, Math.max(0, imgData.data[i] + noise));
-            imgData.data[i+1] = Math.min(255, Math.max(0, imgData.data[i+1] + noise));
-            imgData.data[i+2] = Math.min(255, Math.max(0, imgData.data[i+2] + noise));
-        }
-    }
-    
-    ctx.putImageData(imgData, 0, 0);
-    ctx.restore();
-
-    // 3. 更新狀態
-    // 把目前的結果存為新的 Base Image，這樣可以疊加操作
-    const newImg = new Image();
-    newImg.src = canvas.toDataURL('image/jpeg', 0.9);
-    newImg.onload = () => {
-        setImage(newImg); // 更新主圖
-        setRemoveMaskPoints([]); // 清空遮罩
-        setIsProcessing(false);
-        setAiAnalysisResult('');
-    };
-  };
-
-  // --- 特效與濾鏡函數 (保持不變) ---
   const applyKira = (ctx, width, height, intensity) => {
     const sampleScale = 0.2; 
     const sw = Math.floor(width * sampleScale);
@@ -438,10 +255,19 @@ export default function App() {
     setTimeout(() => setAiAnalysisResult(''), 3000);
   };
 
+  // 一鍵美顏設定 (Auto Mode)
+  const applyInstantBeauty = () => {
+    setSettings(prev => ({
+        ...prev,
+        beautyLevel: 60, // 自然磨皮強度
+        skinTone: 30,    // 微微提亮
+    }));
+    setAiAnalysisResult("✨ AI 智慧美膚已套用");
+    setTimeout(() => setAiAnalysisResult(''), 2000);
+  }
+
   const processImage = useCallback(() => {
     if (!image || !canvasRef.current) return;
-    // 如果正在塗抹遮罩，不重新渲染底圖，避免閃爍
-    if (isDrawingMask) return; 
 
     setIsProcessing(true);
     const canvas = canvasRef.current;
@@ -458,7 +284,51 @@ export default function App() {
     }
 
     ctx.clearRect(0, 0, width, height);
+    
+    // 1. 繪製底圖
     ctx.drawImage(image, 0, 0, width, height);
+
+    // ==========================================
+    // 💄 AI 美顏處理 (Natural Skin Smoothing)
+    // ==========================================
+    if (settings.beautyLevel > 0) {
+        // 我們使用「堆疊法」模擬磨皮，這比複雜的算法快且自然
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = width;
+        tempCanvas.height = height;
+        const tCtx = tempCanvas.getContext('2d');
+        tCtx.drawImage(canvas, 0, 0);
+
+        // A. 磨皮與去斑 (Heal)
+        // 原理：使用 lighten 模式疊加模糊層，可以「吃掉」比周圍暗的像素 (如痘痘、斑點)
+        // 但保留比周圍亮的細節 (如眼神光)
+        ctx.save();
+        const blurAmount = Math.max(2, settings.beautyLevel / 5); // 動態模糊量
+        ctx.filter = `blur(${blurAmount}px)`;
+        ctx.globalCompositeOperation = 'lighten'; // 關鍵混合模式
+        ctx.globalAlpha = settings.beautyLevel / 100 * 0.6; // 強度控制
+        ctx.drawImage(tempCanvas, 0, 0);
+        ctx.restore();
+
+        // B. 柔膚與均勻膚色 (Soft Skin)
+        // 原理：使用 screen 模式疊加一層微模糊層，讓皮膚看起來有光澤
+        ctx.save();
+        ctx.filter = `blur(${blurAmount * 2}px)`; 
+        ctx.globalCompositeOperation = 'screen'; 
+        ctx.globalAlpha = settings.beautyLevel / 100 * 0.3; // 淡淡的光澤
+        ctx.drawImage(tempCanvas, 0, 0);
+        ctx.restore();
+    }
+
+    // C. 美白 (Skin Brightening)
+    if (settings.skinTone > 0) {
+        ctx.save();
+        ctx.globalCompositeOperation = 'soft-light'; // 柔光模式適合提亮膚色
+        ctx.fillStyle = `rgba(255, 230, 220, ${settings.skinTone / 100 * 0.4})`; // 暖白膚色
+        ctx.fillRect(0, 0, width, height);
+        ctx.restore();
+    }
+    // ==========================================
 
     const currentFilter = FILTERS.find(f => f.id === settings.filterId);
     
@@ -507,7 +377,7 @@ export default function App() {
 
     setProcessedUrl(canvas.toDataURL('image/jpeg', 0.9));
     setIsProcessing(false);
-  }, [image, settings, isDrawingMask]); // 加入 isDrawingMask 依賴
+  }, [image, settings]);
 
   useEffect(() => {
     const timer = setTimeout(() => processImage(), 50);
@@ -584,13 +454,11 @@ export default function App() {
       <div className="flex-1 relative bg-neutral-900/50 p-4 flex flex-col justify-center overflow-hidden">
         {processedUrl ? (
           <div className="relative w-full h-full flex flex-col items-center justify-center"
-               onPointerDown={activeTab === 'remove' ? handleTouchStart : () => setIsComparing(true)}
-               onPointerUp={activeTab === 'remove' ? handleTouchEnd : () => setIsComparing(false)}
-               onPointerLeave={activeTab === 'remove' ? handleTouchEnd : () => setIsComparing(false)}
-               onPointerMove={activeTab === 'remove' ? handleTouchMove : undefined}
-               onTouchStart={activeTab === 'remove' ? handleTouchStart : () => setIsComparing(true)}
-               onTouchEnd={activeTab === 'remove' ? handleTouchEnd : () => setIsComparing(false)}
-               onTouchMove={activeTab === 'remove' ? handleTouchMove : undefined}
+               onPointerDown={() => setIsComparing(true)}
+               onPointerUp={() => setIsComparing(false)}
+               onPointerLeave={() => setIsComparing(false)}
+               onTouchStart={() => setIsComparing(true)}
+               onTouchEnd={() => setIsComparing(false)}
                >
              
              {/* 頂部狀態 */}
@@ -606,7 +474,6 @@ export default function App() {
 
             {/* 主圖片顯示 */}
             <img 
-              ref={imgRef}
               src={isComparing ? originalUrl : processedUrl} 
               alt="Preview" 
               className="max-w-full max-h-full object-contain shadow-2xl shadow-black select-none" 
@@ -614,22 +481,10 @@ export default function App() {
               onContextMenu={(e) => e.preventDefault()} 
             />
             
-            {/* 塗抹遮罩層 (僅在 Remove 模式顯示) */}
-            <canvas 
-                ref={maskCanvasRef}
-                className={`absolute pointer-events-none ${activeTab === 'remove' ? 'opacity-100' : 'opacity-0'}`}
-                style={{
-                    width: imgRef.current ? imgRef.current.width : '100%',
-                    height: imgRef.current ? imgRef.current.height : '100%'
-                }}
-            />
-            
-            {/* 提示文字 (非 Remove 模式) */}
-            {activeTab !== 'remove' && (
-                <div className={`absolute bottom-4 text-[10px] text-neutral-500 tracking-widest uppercase transition-opacity ${isComparing ? 'opacity-0' : 'opacity-60'}`}>
-                Press & Hold to Compare
-                </div>
-            )}
+            {/* 提示文字 */}
+            <div className={`absolute bottom-4 text-[10px] text-neutral-500 tracking-widest uppercase transition-opacity ${isComparing ? 'opacity-0' : 'opacity-60'}`}>
+               Press & Hold to Compare
+            </div>
             
             {isProcessing && (
               <div className="absolute inset-0 flex items-center justify-center bg-black/20 backdrop-blur-[2px] z-10">
@@ -643,6 +498,36 @@ export default function App() {
       {/* Controls */}
       <div className="bg-black border-t border-white/5 pb-safe z-30">
         
+        {/* Beauty Tab (New) */}
+        {activeTab === 'beauty' && (
+          <div className="px-6 py-6 space-y-6 animate-in slide-in-from-bottom-2">
+            <div className="flex justify-between items-center mb-4">
+               <span className="text-xs font-bold text-neutral-500 uppercase">Natural Retouch</span>
+               <button onClick={applyInstantBeauty} className="flex items-center gap-1 text-[10px] px-3 py-1 rounded-full border border-orange-500 text-orange-500 hover:bg-orange-500 hover:text-white transition-all">
+                 <Sparkles size={10} /> ONE-TAP FIX
+               </button>
+            </div>
+            
+            <div className="space-y-4">
+               <div className="space-y-2">
+                 <div className="flex justify-between text-xs text-neutral-300">
+                   <span>Smooth (磨皮)</span>
+                   <span className="font-mono text-neutral-500">{settings.beautyLevel}%</span>
+                 </div>
+                 <input type="range" min="0" max="100" value={settings.beautyLevel} onChange={(e) => setSettings({...settings, beautyLevel: parseInt(e.target.value)})} className="w-full h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-orange-500" />
+               </div>
+
+               <div className="space-y-2">
+                 <div className="flex justify-between text-xs text-neutral-300">
+                   <span>Brighten (提亮)</span>
+                   <span className="font-mono text-neutral-500">{settings.skinTone}%</span>
+                 </div>
+                 <input type="range" min="0" max="100" value={settings.skinTone} onChange={(e) => setSettings({...settings, skinTone: parseInt(e.target.value)})} className="w-full h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-orange-500" />
+               </div>
+            </div>
+          </div>
+        )}
+
         {/* Adjust - 簡化版 */}
         {activeTab === 'adjust' && (
           <div className="px-6 py-6 space-y-6 animate-in slide-in-from-bottom-2">
@@ -650,7 +535,6 @@ export default function App() {
                <span className="text-xs font-bold text-neutral-500 uppercase">Global Params</span>
                <button onClick={() => setSettings(s => ({...s, showTimestamp: !s.showTimestamp}))} className={`text-[10px] px-3 py-1 rounded-full border transition-colors ${settings.showTimestamp ? 'bg-orange-500 border-orange-500 text-white' : 'border-neutral-700 text-neutral-400'}`}>DATE STAMP</button>
             </div>
-            {/* 移除了亮度/對比滑桿，保持介面乾淨 */}
             <div className="text-center text-neutral-600 text-xs py-2">
               AUTO AI ENHANCEMENT ENABLED
             </div>
@@ -701,38 +585,12 @@ export default function App() {
           </div>
         )}
         
-        {/* Remove Tab (New Logic) */}
-        {activeTab === 'remove' && (
-          <div className="px-6 py-6 space-y-4 animate-in slide-in-from-bottom-2">
-            <div className="flex justify-between items-center mb-2">
-               <span className="text-xs font-bold text-neutral-500 uppercase">SMART REMOVER</span>
-               <div className="flex gap-4">
-                   <button onClick={() => setRemoveMaskPoints([])} className="text-xs text-neutral-400 flex items-center gap-1 hover:text-white"><Trash2 size={12}/> CLEAR</button>
-               </div>
-            </div>
-            
-            <div className="flex items-center gap-4">
-                <span className="text-[10px] text-neutral-400">BRUSH</span>
-                <input type="range" min="5" max="50" value={brushSize} onChange={(e) => setBrushSize(parseInt(e.target.value))} className="w-full h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-red-500" />
-            </div>
-
-            <button 
-                onClick={applySmartRemove} 
-                disabled={removeMaskPoints.length === 0}
-                className="w-full bg-red-600 hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold py-3 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-red-900/20 active:scale-[0.98] transition-all"
-            >
-              <Eraser size={16} /> 
-              {removeMaskPoints.length === 0 ? 'PAINT TO REMOVE' : 'APPLY REMOVAL'}
-            </button>
-            <p className="text-[9px] text-neutral-600 text-center uppercase tracking-wider">Use finger to paint over objects</p>
-          </div>
-        )}
-
         {/* Nav */}
         <div className="flex justify-center gap-8 items-center pt-2 pb-6 border-t border-white/5 bg-black">
           <button onClick={() => setActiveTab('filters')} className={`flex flex-col items-center gap-1 transition-colors p-2 ${activeTab === 'filters' ? 'text-white' : 'text-neutral-600'}`}><Aperture size={20} /><span className="text-[9px] font-bold">FILTERS</span></button>
           <button onClick={() => setActiveTab('effects')} className={`flex flex-col items-center gap-1 transition-colors p-2 ${activeTab === 'effects' ? 'text-white' : 'text-neutral-600'}`}><Stars size={20} /><span className="text-[9px] font-bold">FX</span></button>
-          <button onClick={() => setActiveTab('remove')} className={`flex flex-col items-center gap-1 transition-colors p-2 ${activeTab === 'remove' ? 'text-red-500' : 'text-neutral-600'}`}><Eraser size={20} /><span className="text-[9px] font-bold">REMOVE</span></button>
+          {/* New Beauty Tab */}
+          <button onClick={() => setActiveTab('beauty')} className={`flex flex-col items-center gap-1 transition-colors p-2 ${activeTab === 'beauty' ? 'text-pink-500' : 'text-neutral-600'}`}><User size={20} /><span className="text-[9px] font-bold">BEAUTY</span></button>
           <button onClick={() => setActiveTab('adjust')} className={`flex flex-col items-center gap-1 transition-colors p-2 ${activeTab === 'adjust' ? 'text-white' : 'text-neutral-600'}`}><Sliders size={20} /><span className="text-[9px] font-bold">ADJUST</span></button>
         </div>
       </div>
