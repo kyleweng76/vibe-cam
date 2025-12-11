@@ -3,7 +3,6 @@ import {
   Download, 
   Share, 
   Wand2, 
-  Sliders, 
   Image as ImageIcon, 
   Undo2, 
   Aperture,
@@ -17,7 +16,8 @@ import {
   Smartphone,
   Cpu,
   User, 
-  Check
+  BicepsFlexed, 
+  Triangle 
 } from 'lucide-react';
 
 // --- Vibe Logo Component ---
@@ -101,16 +101,22 @@ export default function App() {
   
   const [settings, setSettings] = useState({
     // 美顏參數
-    beautyLevel: 0, // 0-100 (磨皮)
-    skinTone: 0,    // 0-100 (美白)
+    beautyLevel: 0,
+    skinTone: 0,
     
-    // 全局參數
+    // 細節參數
+    structure: 0, // 輪廓結構 (肌肉增強)
+    sharpen: 0,   // 銳化
+    
+    // 濾鏡與特效
+    filterId: 'none',
+    effectId: 'none',
+    effectIntensity: 70,
+    
+    // 全局參數 (保留結構但不顯示UI)
     brightness: 100,  
     contrast: 100,    
-    filterId: 'none',
     showTimestamp: false,
-    effectId: 'none',
-    effectIntensity: 70 
   });
 
   const [activeTab, setActiveTab] = useState('filters'); 
@@ -133,12 +139,14 @@ export default function App() {
           setSettings({
             beautyLevel: 0,
             skinTone: 0,
-            brightness: 100,  
-            contrast: 100,    
+            structure: 0,
+            sharpen: 0,
             filterId: 'none', 
-            showTimestamp: false,
             effectId: 'none',
-            effectIntensity: 70
+            effectIntensity: 70,
+            brightness: 100,  
+            contrast: 100,
+            showTimestamp: false
           });
           setActiveTab('filters');
         };
@@ -172,6 +180,7 @@ export default function App() {
     }
   };
 
+  // ... (特效函數 applyKira, applyLeak, applyVignette 保持不變) ...
   const applyKira = (ctx, width, height, intensity) => {
     const sampleScale = 0.2; 
     const sw = Math.floor(width * sampleScale);
@@ -237,20 +246,11 @@ export default function App() {
 
   const runAiOptimization = () => {
     if (!canvasRef.current || !image) return;
-    const ctx = canvasRef.current.getContext('2d');
-    const { width, height } = canvasRef.current;
-    const sampleData = ctx.getImageData(width/2 - 50, height/2 - 50, 100, 100).data;
-    let totalR = 0, totalG = 0, totalB = 0;
-    for (let i = 0; i < sampleData.length; i += 4) {
-      totalR += sampleData[i]; totalG += sampleData[i+1]; totalB += sampleData[i+2];
-    }
-    const count = sampleData.length / 4;
-    const brightness = (totalR/count + totalG/count + totalB/count) / 3;
     let msg = "✨ AI 分析完成";
-    let newBri = 100;
-    if (brightness < 60) { newBri = 125; msg = "🌙 增強暗部細節"; } 
-    else if (brightness > 200) { newBri = 90; msg = "☀️ 抑制過度曝光"; }
-    setSettings(prev => ({ ...prev, brightness: newBri }));
+    setSettings(prev => ({ 
+        ...prev, 
+        // 全局 AI 優化現在不預設加強結構，保留給 Detail 功能
+    }));
     setAiAnalysisResult(msg);
     setTimeout(() => setAiAnalysisResult(''), 3000);
   };
@@ -258,13 +258,25 @@ export default function App() {
   const applyInstantBeauty = () => {
     setSettings(prev => ({
         ...prev,
-        beautyLevel: 80, // 強效磨皮
+        beautyLevel: 80, 
         skinTone: 35,    
     }));
     setAiAnalysisResult("✨ Pro Skin Engine 已啟動");
     setTimeout(() => setAiAnalysisResult(''), 2000);
   }
 
+  // 新增：一鍵細節增強 (Muscle/Detail AI)
+  const applyInstantDetail = () => {
+    setSettings(prev => ({
+        ...prev,
+        structure: 50, // AI 推薦的結構強度 (肌肉線條)
+        sharpen: 30,   // AI 推薦的銳化程度 (清晰度)
+    }));
+    setAiAnalysisResult("✨ AI 質感增強已套用");
+    setTimeout(() => setAiAnalysisResult(''), 2000);
+  }
+
+  // 核心渲染
   const processImage = useCallback(() => {
     if (!image || !canvasRef.current) return;
 
@@ -284,59 +296,76 @@ export default function App() {
 
     ctx.clearRect(0, 0, width, height);
     
-    // 1. 繪製底圖 (Original)
+    // 1. 繪製底圖
     ctx.drawImage(image, 0, 0, width, height);
 
     // ==========================================
-    // 💄 AI 強效磨皮 (Pro Skin Polish Algorithm)
+    // 2. 結構增強 (Structure)
+    // ==========================================
+    if (settings.structure > 0) {
+        const structCanvas = document.createElement('canvas');
+        structCanvas.width = width;
+        structCanvas.height = height;
+        const sCtx = structCanvas.getContext('2d');
+        
+        sCtx.drawImage(canvas, 0, 0);
+        sCtx.filter = 'grayscale(100%) contrast(150%)'; 
+        sCtx.drawImage(canvas, 0, 0);
+        sCtx.filter = 'none';
+
+        ctx.save();
+        ctx.globalCompositeOperation = 'overlay';
+        ctx.globalAlpha = (settings.structure / 100) * 0.7;
+        ctx.drawImage(structCanvas, 0, 0);
+        ctx.restore();
+    }
+
+    // ==========================================
+    // 3. 銳化 (Sharpen)
+    // ==========================================
+    if (settings.sharpen > 0) {
+        ctx.save();
+        ctx.globalCompositeOperation = 'overlay';
+        ctx.globalAlpha = (settings.sharpen / 100) * 0.3; 
+        ctx.drawImage(image, 0, 0, width, height);
+        ctx.restore();
+    }
+
+    // ==========================================
+    // 4. 美顏處理
     // ==========================================
     if (settings.beautyLevel > 0) {
-        // 建立模糊層
         const blurCanvas = document.createElement('canvas');
         blurCanvas.width = width;
         blurCanvas.height = height;
         const bCtx = blurCanvas.getContext('2d');
-        
-        // 步驟 1: 製作高斯模糊層 (Gaussian Blur Layer)
-        // 為了去除紋路，模糊半徑必須夠大。我們根據圖片寬度動態計算。
-        // 例如 1920px 寬度時，半徑約為 15-20px
         const blurRadius = Math.max(5, (width * 0.01) * (settings.beautyLevel / 50) + 10);
         
         bCtx.filter = `blur(${blurRadius}px)`;
         bCtx.drawImage(canvas, 0, 0); 
         bCtx.filter = 'none';
 
-        // 步驟 2: 暗部填補 (Dark Spot Filling) - 這是去斑、去法令紋的關鍵
-        // 使用 lighten 模式，將模糊後的亮部像素「蓋」在原本的暗部瑕疵上
-        // 這樣可以保留原本就比較亮的皮膚質感，只修掉凹陷和黑點
         ctx.save();
         ctx.globalCompositeOperation = 'lighten';
-        // 強度係數：最高 0.8，太高會變成平面
         ctx.globalAlpha = (settings.beautyLevel / 100) * 0.8; 
         ctx.drawImage(blurCanvas, 0, 0);
         ctx.restore();
 
-        // 步驟 3: 亮部平滑 (Highlight Smoothing) - 去除油光和粗糙顆粒
-        // 使用 darken 模式，壓制皮膚上過於銳利的反光點
         ctx.save();
         ctx.globalCompositeOperation = 'darken';
-        ctx.globalAlpha = (settings.beautyLevel / 100) * 0.4; // 稍微輕一點，保留一點立體感
+        ctx.globalAlpha = (settings.beautyLevel / 100) * 0.4; 
         ctx.drawImage(blurCanvas, 0, 0);
         ctx.restore();
         
-        // 步驟 4: 細節還原 (Detail Sharpening)
-        // 因為前兩步磨得太強，為了不像塑膠人，我們要疊加一層原圖的銳利度回來
-        // 使用 overlay 疊加原圖，可以增加局部對比，讓五官跳出來
         if (settings.beautyLevel > 30) {
             ctx.save();
             ctx.globalCompositeOperation = 'overlay';
-            ctx.globalAlpha = 0.2; // 淡淡的銳化
+            ctx.globalAlpha = 0.2; 
             ctx.drawImage(image, 0, 0, width, height);
             ctx.restore();
         }
     }
 
-    // C. 美白 (Skin Brightening)
     if (settings.skinTone > 0) {
         ctx.save();
         ctx.globalCompositeOperation = 'soft-light'; 
@@ -344,8 +373,10 @@ export default function App() {
         ctx.fillRect(0, 0, width, height);
         ctx.restore();
     }
-    // ==========================================
 
+    // ==========================================
+    // 5. 濾鏡與特效
+    // ==========================================
     const currentFilter = FILTERS.find(f => f.id === settings.filterId);
     
     if (currentFilter.type === 'bw') {
@@ -356,10 +387,10 @@ export default function App() {
         ctx.restore();
     }
 
-    if (settings.brightness !== 100 || settings.contrast !== 100 || currentFilter.contrast) {
-        const bri = settings.brightness;
-        const con = (settings.contrast / 100) * (currentFilter.contrast || 1);
-        ctx.filter = `brightness(${bri}%) contrast(${con * 100}%)`;
+    if (currentFilter.contrast) {
+        const con = currentFilter.contrast;
+        const finalCon = settings.structure > 0 ? (1 + (con-1)*0.8) : con;
+        ctx.filter = `contrast(${finalCon * 100}%)`;
         ctx.drawImage(canvas, 0, 0);
         ctx.filter = 'none'; 
     }
@@ -514,7 +545,37 @@ export default function App() {
       {/* Controls */}
       <div className="bg-black border-t border-white/5 pb-safe z-30">
         
-        {/* Beauty Tab (New) */}
+        {/* Detail Tab (New!) */}
+        {activeTab === 'detail' && (
+          <div className="px-6 py-6 space-y-6 animate-in slide-in-from-bottom-2">
+            <div className="flex justify-between items-center mb-4">
+               <span className="text-xs font-bold text-neutral-500 uppercase">Detail Engine</span>
+               <button onClick={applyInstantDetail} className="flex items-center gap-1 text-[10px] px-3 py-1 rounded-full border border-blue-500 text-blue-500 hover:bg-blue-500 hover:text-white transition-all active:scale-95">
+                 <Sparkles size={10} /> AI STRUCTURE
+               </button>
+            </div>
+            
+            <div className="space-y-4">
+               <div className="space-y-2">
+                 <div className="flex justify-between text-xs text-neutral-300">
+                   <span className="flex items-center gap-2"><BicepsFlexed size={12} className="text-orange-500"/>Structure (肌肉/輪廓)</span>
+                   <span className="font-mono text-neutral-500">{settings.structure}%</span>
+                 </div>
+                 <input type="range" min="0" max="100" value={settings.structure} onChange={(e) => setSettings({...settings, structure: parseInt(e.target.value)})} className="w-full h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-orange-500" />
+               </div>
+
+               <div className="space-y-2">
+                 <div className="flex justify-between text-xs text-neutral-300">
+                   <span className="flex items-center gap-2"><Triangle size={12} className="text-blue-400 rotate-180"/>Sharpen (銳化)</span>
+                   <span className="font-mono text-neutral-500">{settings.sharpen}%</span>
+                 </div>
+                 <input type="range" min="0" max="100" value={settings.sharpen} onChange={(e) => setSettings({...settings, sharpen: parseInt(e.target.value)})} className="w-full h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-blue-500" />
+               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Beauty Tab */}
         {activeTab === 'beauty' && (
           <div className="px-6 py-6 space-y-6 animate-in slide-in-from-bottom-2">
             <div className="flex justify-between items-center mb-4">
@@ -540,19 +601,6 @@ export default function App() {
                  </div>
                  <input type="range" min="0" max="100" value={settings.skinTone} onChange={(e) => setSettings({...settings, skinTone: parseInt(e.target.value)})} className="w-full h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-orange-500" />
                </div>
-            </div>
-          </div>
-        )}
-
-        {/* Adjust - 簡化版 */}
-        {activeTab === 'adjust' && (
-          <div className="px-6 py-6 space-y-6 animate-in slide-in-from-bottom-2">
-            <div className="flex justify-between items-center mb-4">
-               <span className="text-xs font-bold text-neutral-500 uppercase">Global Params</span>
-               <button onClick={() => setSettings(s => ({...s, showTimestamp: !s.showTimestamp}))} className={`text-[10px] px-3 py-1 rounded-full border transition-colors ${settings.showTimestamp ? 'bg-orange-500 border-orange-500 text-white' : 'border-neutral-700 text-neutral-400'}`}>DATE STAMP</button>
-            </div>
-            <div className="text-center text-neutral-600 text-xs py-2">
-              AUTO AI ENHANCEMENT ENABLED
             </div>
           </div>
         )}
@@ -604,10 +652,13 @@ export default function App() {
         {/* Nav */}
         <div className="flex justify-center gap-8 items-center pt-2 pb-6 border-t border-white/5 bg-black">
           <button onClick={() => setActiveTab('filters')} className={`flex flex-col items-center gap-1 transition-colors p-2 ${activeTab === 'filters' ? 'text-white' : 'text-neutral-600'}`}><Aperture size={20} /><span className="text-[9px] font-bold">FILTERS</span></button>
-          <button onClick={() => setActiveTab('effects')} className={`flex flex-col items-center gap-1 transition-colors p-2 ${activeTab === 'effects' ? 'text-white' : 'text-neutral-600'}`}><Stars size={20} /><span className="text-[9px] font-bold">FX</span></button>
-          {/* New Beauty Tab */}
+          
           <button onClick={() => setActiveTab('beauty')} className={`flex flex-col items-center gap-1 transition-colors p-2 ${activeTab === 'beauty' ? 'text-pink-500' : 'text-neutral-600'}`}><User size={20} /><span className="text-[9px] font-bold">BEAUTY</span></button>
-          <button onClick={() => setActiveTab('adjust')} className={`flex flex-col items-center gap-1 transition-colors p-2 ${activeTab === 'adjust' ? 'text-white' : 'text-neutral-600'}`}><Sliders size={20} /><span className="text-[9px] font-bold">ADJUST</span></button>
+          
+          {/* New Detail Tab */}
+          <button onClick={() => setActiveTab('detail')} className={`flex flex-col items-center gap-1 transition-colors p-2 ${activeTab === 'detail' ? 'text-blue-400' : 'text-neutral-600'}`}><Triangle size={20} className="rotate-180"/><span className="text-[9px] font-bold">DETAIL</span></button>
+          
+          <button onClick={() => setActiveTab('effects')} className={`flex flex-col items-center gap-1 transition-colors p-2 ${activeTab === 'effects' ? 'text-white' : 'text-neutral-600'}`}><Stars size={20} /><span className="text-[9px] font-bold">FX</span></button>
         </div>
       </div>
       <style>{`.no-scrollbar::-webkit-scrollbar { display: none; } .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; } .pb-safe { padding-bottom: env(safe-area-inset-bottom, 20px); }`}</style>
