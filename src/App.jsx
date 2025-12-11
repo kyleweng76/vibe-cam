@@ -424,8 +424,8 @@ export default function App() {
     <div className="flex flex-col h-screen bg-black text-white overflow-hidden font-sans select-none touch-none">
       <canvas ref={canvasRef} className="hidden" />
 
-      {/* Header */}
-      <div className="h-14 px-4 flex items-center justify-between bg-black/80 backdrop-blur-md z-20 border-b border-white/5">
+      {/* Header - 加入 pt-[env(safe-area-inset-top)] 修復瀏海遮擋 */}
+      <div className="pt-[env(safe-area-inset-top)] min-h-[env(safe-area-inset-top)] box-content h-14 px-4 flex items-center justify-between bg-black/80 backdrop-blur-md z-20 border-b border-white/5">
         <button onClick={() => setImage(null)} className="p-2 hover:bg-white/10 rounded-full text-neutral-400">
           <Undo2 size={20} />
         </button>
@@ -461,17 +461,13 @@ export default function App() {
                 )}
              </div>
 
-            {/* 核心修正：
-                1. select-none: 防止反白
-                2. pointer-events-auto: 確保能接收點擊
-                3. WebkitTouchCallout: 'none' -> 禁用 iOS 長按選單 (關鍵!)
-            */}
+            {/* 核心修正：加入 WebkitTouchCallout: 'none' 禁用選單 */}
             <img 
               src={isComparing ? originalUrl : processedUrl} 
               alt="Preview" 
               className="max-w-full max-h-full object-contain shadow-2xl shadow-black select-none" 
               style={{ WebkitTouchCallout: 'none', WebkitUserSelect: 'none' }}
-              onContextMenu={(e) => e.preventDefault()} // 禁用右鍵選單
+              onContextMenu={(e) => e.preventDefault()} 
             />
             
             {/* 底部提示文字 */}
