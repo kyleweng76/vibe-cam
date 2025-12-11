@@ -14,9 +14,26 @@ import {
   Stars,      
   Flame,      
   CircleDot,
-  Smartphone, // 手機圖示
-  Cpu         // CPU圖示
+  Smartphone,
+  Cpu,
+  ArrowRight
 } from 'lucide-react';
+
+// --- Vibe Logo Component ---
+const VibeLogo = ({ className = "" }) => (
+  <svg viewBox="0 0 512 512" className={className} xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="vibe-logo-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="#F97316" />
+        <stop offset="50%" stopColor="#EC4899" />
+        <stop offset="100%" stopColor="#A855F7" />
+      </linearGradient>
+    </defs>
+    <path d="M126 126 Q256 536 386 126 L436 176 Q256 636 76 176 Z" fill="url(#vibe-logo-gradient)" />
+    <path d="M126 206 L6 76 L56 176 Z" fill="url(#vibe-logo-gradient)" opacity="0.8" />
+    <path d="M386 206 L506 76 L456 176 Z" fill="url(#vibe-logo-gradient)" opacity="0.8" />
+  </svg>
+);
 
 // 濾鏡定義
 const FILTERS = [
@@ -230,13 +247,11 @@ export default function App() {
     ctx.restore();
   };
 
-  // 升級版：AI 場景優化 (加入色溫分析)
   const runAiOptimization = () => {
     if (!canvasRef.current || !image) return;
     const ctx = canvasRef.current.getContext('2d');
     const { width, height } = canvasRef.current;
     
-    // 採樣中心區域
     const sampleData = ctx.getImageData(width/2 - 50, height/2 - 50, 100, 100).data;
     let totalR = 0, totalG = 0, totalB = 0;
     
@@ -255,7 +270,6 @@ export default function App() {
     let msg = "✨ AI 分析完成";
     let newBri = 100;
     
-    // 1. 亮度校正
     if (brightness < 60) {
         newBri = 125;
         msg = "🌙 增強暗部細節";
@@ -264,10 +278,6 @@ export default function App() {
         msg = "☀️ 抑制過度曝光";
     }
     
-    // 2. 色溫校正 (簡單版)
-    // 如果紅色遠大於藍色，可能是室內黃光，稍微冷卻一點
-    // 如果藍色太高，可能是陰天，稍微加暖
-    // 這邊我們不直接改色溫參數(太複雜)，而是給出提示並微調亮度
     if (avgR > avgB + 30) {
        msg += " | 🌡️ 色溫偏暖";
     } else if (avgB > avgR + 30) {
@@ -368,25 +378,33 @@ export default function App() {
   if (!image) {
     return (
       <div className="flex flex-col items-center justify-center h-screen bg-black text-white p-6 font-sans">
-        <div className="w-full max-w-md space-y-12 text-center">
-          <div className="space-y-4">
-            <h1 className="text-5xl font-black tracking-tighter italic bg-gradient-to-r from-orange-500 via-pink-500 to-purple-500 bg-clip-text text-transparent animate-pulse">
-              VIBE CAM
-            </h1>
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-neutral-900 border border-neutral-800 text-[10px] text-neutral-400">
-              <Cpu size={12} className="text-orange-500" />
-              <span>AI-Powered Engine</span>
+        <div className="w-full max-w-md space-y-12 text-center flex flex-col items-center">
+          <div className="space-y-6 flex flex-col items-center">
+            <div className="w-24 h-24 relative group cursor-pointer transition-transform hover:scale-105" onClick={triggerFileInput}>
+                <div className="absolute inset-0 bg-gradient-to-r from-orange-500 via-pink-500 to-purple-500 rounded-3xl blur-xl opacity-40 group-hover:opacity-60 transition-opacity" />
+                <VibeLogo className="w-full h-full relative z-10 drop-shadow-2xl" />
+            </div>
+            
+            <div className="space-y-2">
+              <h1 className="text-4xl font-black tracking-tighter italic bg-gradient-to-r from-orange-500 via-pink-500 to-purple-500 bg-clip-text text-transparent">
+                VIBE CAM
+              </h1>
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-neutral-900 border border-neutral-800 text-[10px] text-neutral-400">
+                <Cpu size={12} className="text-orange-500" />
+                <span>AI-Powered Engine</span>
+              </div>
             </div>
           </div>
 
-          <div onClick={triggerFileInput} className="group relative w-64 h-64 mx-auto rounded-full border border-neutral-800 bg-neutral-900/30 cursor-pointer flex items-center justify-center transition-transform active:scale-95">
-            <div className="absolute inset-0 border border-neutral-800 rounded-full scale-110 opacity-30 animate-ping" />
-            <ImageIcon size={48} className="text-neutral-400 group-hover:text-orange-500 transition-colors" />
-            <span className="absolute bottom-16 text-xs font-bold tracking-widest text-neutral-500 group-hover:text-white">TAP TO START</span>
-          </div>
+          <button onClick={triggerFileInput} className="group relative w-64 h-16 rounded-full border border-neutral-800 bg-neutral-900/50 hover:bg-neutral-800 cursor-pointer flex items-center justify-center transition-all active:scale-95 overflow-hidden">
+            <div className="absolute inset-0 bg-gradient-to-r from-orange-500/10 to-purple-500/10 opacity-0 group-hover:opacity-100 transition-opacity" />
+            <span className="text-xs font-bold tracking-[0.2em] text-white flex items-center gap-3">
+              <ImageIcon size={16} className="text-orange-500" />
+              TAP TO START
+            </span>
+          </button>
 
-          {/* 硬體需求提示 */}
-          <div className="space-y-2">
+          <div className="space-y-2 opacity-60">
             <div className="flex items-center justify-center gap-2 text-neutral-500 text-[10px] uppercase tracking-widest">
               <Smartphone size={12} />
               <span>Device Requirement</span>
@@ -403,7 +421,7 @@ export default function App() {
   }
 
   return (
-    <div className="flex flex-col h-screen bg-black text-white overflow-hidden font-sans">
+    <div className="flex flex-col h-screen bg-black text-white overflow-hidden font-sans select-none touch-none">
       <canvas ref={canvasRef} className="hidden" />
 
       {/* Header */}
@@ -411,21 +429,28 @@ export default function App() {
         <button onClick={() => setImage(null)} className="p-2 hover:bg-white/10 rounded-full text-neutral-400">
           <Undo2 size={20} />
         </button>
-        <span className="font-black italic text-lg tracking-tighter bg-gradient-to-r from-orange-500 to-pink-500 bg-clip-text text-transparent">VIBE</span>
-        <button onClick={handleSave} className="bg-white text-black px-5 py-1.5 rounded-full text-xs font-bold tracking-wide flex items-center gap-2">
+        <div className="flex items-center gap-2">
+           <VibeLogo className="w-6 h-6" />
+           <span className="font-black italic text-lg tracking-tighter bg-gradient-to-r from-orange-500 to-pink-500 bg-clip-text text-transparent">VIBE</span>
+        </div>
+        <button onClick={handleSave} className="bg-white text-black px-5 py-1.5 rounded-full text-xs font-bold tracking-wide flex items-center gap-2 active:scale-95 transition-transform">
           {navigator.share ? <Share size={14} /> : <Download size={14} />}
           {navigator.share ? 'SHARE' : 'SAVE'}
         </button>
       </div>
 
-      {/* Preview - 修正裁切問題 */}
+      {/* Preview */}
       <div className="flex-1 relative bg-neutral-900/50 p-4 flex flex-col justify-center overflow-hidden">
         {processedUrl ? (
-          <div className="relative w-full h-full flex items-center justify-center"
+          <div className="relative w-full h-full flex flex-col items-center justify-center"
                onPointerDown={() => setIsComparing(true)}
-               onPointerUp={() => setIsComparing(false)}>
+               onPointerUp={() => setIsComparing(false)}
+               onPointerLeave={() => setIsComparing(false)}
+               onTouchStart={() => setIsComparing(true)}
+               onTouchEnd={() => setIsComparing(false)}
+               >
              
-             {/* 狀態提示 */}
+             {/* 頂部狀態 */}
              <div className="absolute top-0 left-0 right-0 flex justify-center pointer-events-none z-20 pt-4">
                 {aiAnalysisResult ? (
                    <div className="bg-black/60 backdrop-blur px-4 py-1.5 rounded-full text-xs text-orange-400 border border-orange-500/20 shadow-lg animate-in slide-in-from-top-2">
@@ -436,12 +461,23 @@ export default function App() {
                 )}
              </div>
 
-            {/* 核心修正：使用 object-contain 與 max-h/max-w 確保完整顯示 */}
+            {/* 核心修正：
+                1. select-none: 防止反白
+                2. pointer-events-auto: 確保能接收點擊
+                3. WebkitTouchCallout: 'none' -> 禁用 iOS 長按選單 (關鍵!)
+            */}
             <img 
               src={isComparing ? originalUrl : processedUrl} 
               alt="Preview" 
-              className="max-w-full max-h-full object-contain shadow-2xl shadow-black" 
+              className="max-w-full max-h-full object-contain shadow-2xl shadow-black select-none" 
+              style={{ WebkitTouchCallout: 'none', WebkitUserSelect: 'none' }}
+              onContextMenu={(e) => e.preventDefault()} // 禁用右鍵選單
             />
+            
+            {/* 底部提示文字 */}
+            <div className={`absolute bottom-4 text-[10px] text-neutral-500 tracking-widest uppercase transition-opacity ${isComparing ? 'opacity-0' : 'opacity-60'}`}>
+               Press & Hold to Compare
+            </div>
             
             {isProcessing && (
               <div className="absolute inset-0 flex items-center justify-center bg-black/20 backdrop-blur-[2px] z-10">
