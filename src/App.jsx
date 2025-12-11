@@ -16,7 +16,7 @@ import {
   CircleDot,
   Smartphone,
   Cpu,
-  User, // 美顏圖示
+  User, 
   Check
 } from 'lucide-react';
 
@@ -172,7 +172,6 @@ export default function App() {
     }
   };
 
-  // ... (特效函數保持不變: applyKira, applyLeak, applyVignette) ...
   const applyKira = (ctx, width, height, intensity) => {
     const sampleScale = 0.2; 
     const sw = Math.floor(width * sampleScale);
@@ -256,18 +255,16 @@ export default function App() {
     setTimeout(() => setAiAnalysisResult(''), 3000);
   };
 
-  // 一鍵美顏設定 (Auto Mode) - 增強參數
   const applyInstantBeauty = () => {
     setSettings(prev => ({
         ...prev,
-        beautyLevel: 75, // 提高預設強度，確保有感
-        skinTone: 40,    
+        beautyLevel: 80, // 強效磨皮
+        skinTone: 35,    
     }));
-    setAiAnalysisResult("✨ AI 智慧磨皮已套用");
+    setAiAnalysisResult("✨ Pro Skin Engine 已啟動");
     setTimeout(() => setAiAnalysisResult(''), 2000);
   }
 
-  // 核心渲染 - 升級版美顏演算法
   const processImage = useCallback(() => {
     if (!image || !canvasRef.current) return;
 
@@ -291,60 +288,59 @@ export default function App() {
     ctx.drawImage(image, 0, 0, width, height);
 
     // ==========================================
-    // 💄 AI 美顏處理 (Dual-Pass Frequency Smoothing)
+    // 💄 AI 強效磨皮 (Pro Skin Polish Algorithm)
     // ==========================================
     if (settings.beautyLevel > 0) {
-        // 準備一個模糊的圖層 (Base Layer)
-        // 增加模糊半徑，讓皮膚更平滑
-        const blurRadius = Math.max(3, settings.beautyLevel / 3.5); 
-        
+        // 建立模糊層
         const blurCanvas = document.createElement('canvas');
         blurCanvas.width = width;
         blurCanvas.height = height;
         const bCtx = blurCanvas.getContext('2d');
         
-        // 為了效能，我們可以先繪製底圖，然後應用 filter
-        bCtx.drawImage(canvas, 0, 0); 
-        // 使用 CSS Filter 在 Canvas 上進行模糊 (這比 JS 迴圈快)
-        // 注意：為了正確應用模糊，我們需要在繪製時應用 filter，或者對畫布進行處理
-        // 這裡我們用一個簡單的方法：清除重畫
-        bCtx.clearRect(0, 0, width, height);
+        // 步驟 1: 製作高斯模糊層 (Gaussian Blur Layer)
+        // 為了去除紋路，模糊半徑必須夠大。我們根據圖片寬度動態計算。
+        // 例如 1920px 寬度時，半徑約為 15-20px
+        const blurRadius = Math.max(5, (width * 0.01) * (settings.beautyLevel / 50) + 10);
+        
         bCtx.filter = `blur(${blurRadius}px)`;
-        bCtx.drawImage(canvas, 0, 0); // 畫入原圖並模糊
+        bCtx.drawImage(canvas, 0, 0); 
         bCtx.filter = 'none';
 
-        // 步驟 1: 亮部抑制 (Flatten Highlights/Bumps)
-        // 使用 darken 模式疊加模糊層，可以消除皮膚上的細微凸起和油光 (雜點)
+        // 步驟 2: 暗部填補 (Dark Spot Filling) - 這是去斑、去法令紋的關鍵
+        // 使用 lighten 模式，將模糊後的亮部像素「蓋」在原本的暗部瑕疵上
+        // 這樣可以保留原本就比較亮的皮膚質感，只修掉凹陷和黑點
         ctx.save();
-        ctx.globalCompositeOperation = 'darken';
-        // 係數設為 0.5 左右，太高會讓畫面變髒，太低沒效果
-        ctx.globalAlpha = (settings.beautyLevel / 100) * 0.5; 
+        ctx.globalCompositeOperation = 'lighten';
+        // 強度係數：最高 0.8，太高會變成平面
+        ctx.globalAlpha = (settings.beautyLevel / 100) * 0.8; 
         ctx.drawImage(blurCanvas, 0, 0);
         ctx.restore();
 
-        // 步驟 2: 暗部補償 (Fill Pores/Spots)
-        // 使用 lighten 模式疊加模糊層，消除毛孔和黑斑 (雜點)
+        // 步驟 3: 亮部平滑 (Highlight Smoothing) - 去除油光和粗糙顆粒
+        // 使用 darken 模式，壓制皮膚上過於銳利的反光點
         ctx.save();
-        ctx.globalCompositeOperation = 'lighten';
-        ctx.globalAlpha = (settings.beautyLevel / 100) * 0.6; // 稍微強一點
+        ctx.globalCompositeOperation = 'darken';
+        ctx.globalAlpha = (settings.beautyLevel / 100) * 0.4; // 稍微輕一點，保留一點立體感
         ctx.drawImage(blurCanvas, 0, 0);
         ctx.restore();
         
-        // 步驟 3: 柔焦融合 (Soft Glow)
-        // 最後加一層淡淡的 overlay，讓整體光影過渡更自然，減少「修圖痕跡」
-        ctx.save();
-        ctx.globalCompositeOperation = 'overlay';
-        ctx.globalAlpha = (settings.beautyLevel / 100) * 0.15;
-        ctx.drawImage(blurCanvas, 0, 0);
-        ctx.restore();
+        // 步驟 4: 細節還原 (Detail Sharpening)
+        // 因為前兩步磨得太強，為了不像塑膠人，我們要疊加一層原圖的銳利度回來
+        // 使用 overlay 疊加原圖，可以增加局部對比，讓五官跳出來
+        if (settings.beautyLevel > 30) {
+            ctx.save();
+            ctx.globalCompositeOperation = 'overlay';
+            ctx.globalAlpha = 0.2; // 淡淡的銳化
+            ctx.drawImage(image, 0, 0, width, height);
+            ctx.restore();
+        }
     }
 
     // C. 美白 (Skin Brightening)
     if (settings.skinTone > 0) {
         ctx.save();
-        // 改用 soft-light + 白色，效果更像粉底液，比較自然白
         ctx.globalCompositeOperation = 'soft-light'; 
-        ctx.fillStyle = `rgba(255, 245, 240, ${settings.skinTone / 100 * 0.5})`; 
+        ctx.fillStyle = `rgba(255, 245, 235, ${settings.skinTone / 100 * 0.6})`; 
         ctx.fillRect(0, 0, width, height);
         ctx.restore();
     }
@@ -522,7 +518,7 @@ export default function App() {
         {activeTab === 'beauty' && (
           <div className="px-6 py-6 space-y-6 animate-in slide-in-from-bottom-2">
             <div className="flex justify-between items-center mb-4">
-               <span className="text-xs font-bold text-neutral-500 uppercase">Natural Retouch</span>
+               <span className="text-xs font-bold text-neutral-500 uppercase">Pro Skin Engine</span>
                <button onClick={applyInstantBeauty} className="flex items-center gap-1 text-[10px] px-3 py-1 rounded-full border border-orange-500 text-orange-500 hover:bg-orange-500 hover:text-white transition-all active:scale-95">
                  <Sparkles size={10} /> ONE-TAP FIX
                </button>
@@ -531,7 +527,7 @@ export default function App() {
             <div className="space-y-4">
                <div className="space-y-2">
                  <div className="flex justify-between text-xs text-neutral-300">
-                   <span>Smooth (磨皮)</span>
+                   <span>Smooth (磨皮祛斑)</span>
                    <span className="font-mono text-neutral-500">{settings.beautyLevel}%</span>
                  </div>
                  <input type="range" min="0" max="100" value={settings.beautyLevel} onChange={(e) => setSettings({...settings, beautyLevel: parseInt(e.target.value)})} className="w-full h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-orange-500" />
@@ -539,7 +535,7 @@ export default function App() {
 
                <div className="space-y-2">
                  <div className="flex justify-between text-xs text-neutral-300">
-                   <span>Brighten (提亮)</span>
+                   <span>Brighten (提亮美白)</span>
                    <span className="font-mono text-neutral-500">{settings.skinTone}%</span>
                  </div>
                  <input type="range" min="0" max="100" value={settings.skinTone} onChange={(e) => setSettings({...settings, skinTone: parseInt(e.target.value)})} className="w-full h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-orange-500" />
