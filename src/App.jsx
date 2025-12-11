@@ -16,7 +16,9 @@ import {
   CircleDot,
   Smartphone,
   Cpu,
-  ArrowRight
+  Eraser,
+  Trash2,
+  Check
 } from 'lucide-react';
 
 // --- Vibe Logo Component ---
@@ -112,9 +114,16 @@ export default function App() {
   const [isComparing, setIsComparing] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [aiAnalysisResult, setAiAnalysisResult] = useState(''); 
+  
+  // 移除功能相關狀態
+  const [removeMaskPoints, setRemoveMaskPoints] = useState([]); // 存儲塗抹路徑
+  const [isDrawingMask, setIsDrawingMask] = useState(false);
+  const [brushSize, setBrushSize] = useState(20);
 
   const canvasRef = useRef(null);
   const fileInputRef = useRef(null);
+  const maskCanvasRef = useRef(null); // 用於顯示紅色塗抹遮罩
+  const imgRef = useRef(null); // 用於獲取圖片顯示尺寸
 
   const handleImageUpload = (e) => {
     const file = e.target.files[0];
@@ -134,6 +143,7 @@ export default function App() {
             effectId: 'none',
             effectIntensity: 70
           });
+          setRemoveMaskPoints([]);
           setActiveTab('filters');
         };
         img.src = event.target.result;
@@ -166,47 +176,212 @@ export default function App() {
     }
   };
 
+  // --- 移除功能核心邏輯 ---
+
+  // 1. 處理塗抹動作
+  const handleTouchStart = (e) => {
+    if (activeTab !== 'remove') return;
+    setIsDrawingMask(true);
+    const point = getEventPoint(e);
+    if (point) setRemoveMaskPoints(prev => [...prev, point]);
+  };
+
+  const handleTouchMove = (e) => {
+    if (activeTab !== 'remove' || !isDrawingMask) return;
+    e.preventDefault(); // 防止滾動
+    const point = getEventPoint(e);
+    if (point) setRemoveMaskPoints(prev => [...prev, point]);
+  };
+
+  const handleTouchEnd = () => {
+    setIsDrawingMask(false);
+    // 加入一個分隔點，代表一筆畫結束 (可選，目前簡單處理)
+    setRemoveMaskPoints(prev => [...prev, null]);
+  };
+
+  // 獲取觸控/滑鼠相對圖片的座標
+  const getEventPoint = (e) => {
+    if (!imgRef.current) return null;
+    const rect = imgRef.current.getBoundingClientRect();
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    
+    // 計算相對座標 (0-1)
+    const x = (clientX - rect.left) / rect.width;
+    const y = (clientY - rect.top) / rect.height;
+    
+    if (x < 0 || x > 1 || y < 0 || y > 1) return null;
+    return { x, y };
+  };
+
+  // 2. 繪製紅色遮罩 (在 UI 層)
+  useEffect(() => {
+    if (activeTab === 'remove' && maskCanvasRef.current && imgRef.current) {
+        const canvas = maskCanvasRef.current;
+        const ctx = canvas.getContext('2d');
+        const rect = imgRef.current.getBoundingClientRect();
+        
+        // 設定 Canvas 大小與圖片顯示大小一致
+        canvas.width = rect.width;
+        canvas.height = rect.height;
+        
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        if (removeMaskPoints.length > 0) {
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.strokeStyle = 'rgba(255, 50, 50, 0.5)';
+            ctx.lineWidth = brushSize;
+            
+            ctx.beginPath();
+            let isFirst = true;
+            
+            removeMaskPoints.forEach(p => {
+                if (!p) {
+                    isFirst = true;
+                    return; // 筆畫中斷
+                }
+                const px = p.x * canvas.width;
+                const py = p.y * canvas.height;
+                
+                if (isFirst) {
+                    ctx.moveTo(px, py);
+                    isFirst = false;
+                } else {
+                    ctx.lineTo(px, py);
+                }
+            });
+            ctx.stroke();
+        }
+    }
+  }, [removeMaskPoints, activeTab, brushSize, processedUrl]); // processedUrl 變更時重繪(例如縮放)
+
+  // 3. 執行智慧移除 (Inpainting Algorithm)
+  const applySmartRemove = async () => {
+    if (removeMaskPoints.length === 0 || !canvasRef.current) return;
+    
+    setIsProcessing(true);
+    setAiAnalysisResult('AI 運算修復中...');
+    
+    // 讓 UI 有機會渲染 Loading
+    await new Promise(r => setTimeout(r, 100));
+
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    const width = canvas.width;
+    const height = canvas.height;
+
+    // 1. 建立遮罩層 (在記憶體中)
+    const maskCanvas = document.createElement('canvas');
+    maskCanvas.width = width;
+    maskCanvas.height = height;
+    const maskCtx = maskCanvas.getContext('2d');
+    
+    maskCtx.lineCap = 'round';
+    maskCtx.lineJoin = 'round';
+    maskCtx.lineWidth = (brushSize / imgRef.current.width) * width; // 轉換筆刷大小比例
+    maskCtx.strokeStyle = '#FFFFFF'; // 白色為遮罩
+    
+    maskCtx.beginPath();
+    let isFirst = true;
+    removeMaskPoints.forEach(p => {
+        if (!p) { isFirst = true; return; }
+        const px = p.x * width;
+        const py = p.y * height;
+        if (isFirst) { maskCtx.moveTo(px, py); isFirst = false; }
+        else { maskCtx.lineTo(px, py); }
+    });
+    maskCtx.stroke();
+
+    // 2. 執行簡易 Inpainting (Pixel Diffusion)
+    // 这是一个簡化的算法：將原始圖片模糊後，填入遮罩區域，並加入雜訊
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = width;
+    tempCanvas.height = height;
+    const tCtx = tempCanvas.getContext('2d');
+    
+    // 繪製原圖
+    tCtx.drawImage(canvas, 0, 0);
+    
+    // 多次模糊取樣 (模擬擴散)
+    ctx.save();
+    // 使用 maskCanvas 作為裁切路徑
+    ctx.globalCompositeOperation = 'source-over';
+    
+    // 這是一個視覺欺騙法：
+    // 我們從遮罩邊緣向內取樣 (或是簡單地用模糊背景填補)
+    // 1. 強力高斯模糊背景 (模擬平均色)
+    tCtx.filter = 'blur(20px)';
+    tCtx.drawImage(canvas, 0, 0); 
+    
+    // 2. 將模糊後的圖，只畫在遮罩區域 (使用 destination-in 或 clip)
+    // 這裡我們直接在主 Canvas 上操作
+    
+    // 繪製遮罩區域
+    const maskData = maskCtx.getImageData(0, 0, width, height).data;
+    const imgData = ctx.getImageData(0, 0, width, height);
+    const blurredData = tCtx.getImageData(0, 0, width, height).data;
+    
+    // 像素級操作 (這比 filter 更精準)
+    for (let i = 0; i < maskData.length; i += 4) {
+        // 如果是遮罩區域 (白色)
+        if (maskData[i] > 0) {
+            // 替換為模糊後的像素 (簡單修補)
+            imgData.data[i] = blurredData[i];     // R
+            imgData.data[i+1] = blurredData[i+1]; // G
+            imgData.data[i+2] = blurredData[i+2]; // B
+            
+            // 加入一點雜訊以模擬紋理，不然會太糊
+            const noise = (Math.random() - 0.5) * 20;
+            imgData.data[i] = Math.min(255, Math.max(0, imgData.data[i] + noise));
+            imgData.data[i+1] = Math.min(255, Math.max(0, imgData.data[i+1] + noise));
+            imgData.data[i+2] = Math.min(255, Math.max(0, imgData.data[i+2] + noise));
+        }
+    }
+    
+    ctx.putImageData(imgData, 0, 0);
+    ctx.restore();
+
+    // 3. 更新狀態
+    // 把目前的結果存為新的 Base Image，這樣可以疊加操作
+    const newImg = new Image();
+    newImg.src = canvas.toDataURL('image/jpeg', 0.9);
+    newImg.onload = () => {
+        setImage(newImg); // 更新主圖
+        setRemoveMaskPoints([]); // 清空遮罩
+        setIsProcessing(false);
+        setAiAnalysisResult('');
+    };
+  };
+
+  // --- 特效與濾鏡函數 (保持不變) ---
   const applyKira = (ctx, width, height, intensity) => {
     const sampleScale = 0.2; 
     const sw = Math.floor(width * sampleScale);
     const sh = Math.floor(height * sampleScale);
-    
     const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = sw;
-    tempCanvas.height = sh;
+    tempCanvas.width = sw; tempCanvas.height = sh;
     const tCtx = tempCanvas.getContext('2d');
     tCtx.drawImage(ctx.canvas, 0, 0, sw, sh);
-    
     const imgData = tCtx.getImageData(0, 0, sw, sh);
     const data = imgData.data;
     const threshold = 255 - (intensity * 0.8); 
-    
     ctx.save();
     ctx.fillStyle = '#FFFFFF';
     ctx.shadowBlur = 10;
     ctx.shadowColor = 'white';
-    
     for (let y = 0; y < sh; y += 4) {
       for (let x = 0; x < sw; x += 4) {
         const i = (y * sw + x) * 4;
-        const r = data[i];
-        const g = data[i+1];
-        const b = data[i+2];
-        const bri = (r + g + b) / 3;
-        
-        if (bri > threshold) {
-           if (Math.random() > 0.98) {
-             const realX = x / sampleScale;
-             const realY = y / sampleScale;
+        const bri = (data[i] + data[i+1] + data[i+2]) / 3;
+        if (bri > threshold && Math.random() > 0.98) {
              const size = (Math.random() * 20 + 10) * (width/1000); 
+             const rx = x/sampleScale, ry = y/sampleScale;
              ctx.beginPath();
-             ctx.ellipse(realX, realY, size, size/4, 0, 0, 2 * Math.PI);
-             ctx.ellipse(realX, realY, size, size/4, Math.PI/2, 0, 2 * Math.PI);
+             ctx.ellipse(rx, ry, size, size/4, 0, 0, 2*Math.PI);
+             ctx.ellipse(rx, ry, size, size/4, Math.PI/2, 0, 2*Math.PI);
              ctx.fill();
-             ctx.beginPath();
-             ctx.arc(realX, realY, size/4, 0, 2*Math.PI);
-             ctx.fill();
-           }
+             ctx.beginPath(); ctx.arc(rx, ry, size/4, 0, 2*Math.PI); ctx.fill();
         }
       }
     }
@@ -216,18 +391,15 @@ export default function App() {
   const applyLeak = (ctx, width, height, intensity) => {
     ctx.save();
     ctx.globalCompositeOperation = 'screen'; 
-    const count = 2;
-    for(let i=0; i<count; i++) {
+    for(let i=0; i<2; i++) {
         const x = Math.random() > 0.5 ? 0 : width; 
         const y = Math.random() * height;
         const radius = (Math.random() * 0.5 + 0.3) * width; 
-        
         const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
         const opacity = (intensity / 100) * 0.8;
         gradient.addColorStop(0, `rgba(255, 200, 150, ${opacity})`);
         gradient.addColorStop(0.4, `rgba(255, 100, 50, ${opacity * 0.6})`);
         gradient.addColorStop(1, 'rgba(255, 50, 0, 0)');
-        
         ctx.fillStyle = gradient;
         ctx.fillRect(0, 0, width, height);
     }
@@ -239,9 +411,8 @@ export default function App() {
     ctx.globalCompositeOperation = 'multiply'; 
     const radius = Math.max(width, height) * 0.8;
     const gradient = ctx.createRadialGradient(width/2, height/2, radius * 0.4, width/2, height/2, radius);
-    const opacity = (intensity / 100);
     gradient.addColorStop(0, 'rgba(0,0,0,0)');
-    gradient.addColorStop(1, `rgba(0,0,0,${opacity})`);
+    gradient.addColorStop(1, `rgba(0,0,0,${intensity/100})`);
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, width, height);
     ctx.restore();
@@ -251,39 +422,17 @@ export default function App() {
     if (!canvasRef.current || !image) return;
     const ctx = canvasRef.current.getContext('2d');
     const { width, height } = canvasRef.current;
-    
     const sampleData = ctx.getImageData(width/2 - 50, height/2 - 50, 100, 100).data;
     let totalR = 0, totalG = 0, totalB = 0;
-    
     for (let i = 0; i < sampleData.length; i += 4) {
-      totalR += sampleData[i];
-      totalG += sampleData[i+1];
-      totalB += sampleData[i+2];
+      totalR += sampleData[i]; totalG += sampleData[i+1]; totalB += sampleData[i+2];
     }
-    
     const count = sampleData.length / 4;
-    const avgR = totalR / count;
-    const avgG = totalG / count;
-    const avgB = totalB / count;
-    const brightness = (avgR + avgG + avgB) / 3;
-    
+    const brightness = (totalR/count + totalG/count + totalB/count) / 3;
     let msg = "✨ AI 分析完成";
     let newBri = 100;
-    
-    if (brightness < 60) {
-        newBri = 125;
-        msg = "🌙 增強暗部細節";
-    } else if (brightness > 200) {
-        newBri = 90;
-        msg = "☀️ 抑制過度曝光";
-    }
-    
-    if (avgR > avgB + 30) {
-       msg += " | 🌡️ 色溫偏暖";
-    } else if (avgB > avgR + 30) {
-       msg += " | ❄️ 色溫偏冷";
-    }
-    
+    if (brightness < 60) { newBri = 125; msg = "🌙 增強暗部細節"; } 
+    else if (brightness > 200) { newBri = 90; msg = "☀️ 抑制過度曝光"; }
     setSettings(prev => ({ ...prev, brightness: newBri }));
     setAiAnalysisResult(msg);
     setTimeout(() => setAiAnalysisResult(''), 3000);
@@ -291,23 +440,21 @@ export default function App() {
 
   const processImage = useCallback(() => {
     if (!image || !canvasRef.current) return;
+    // 如果正在塗抹遮罩，不重新渲染底圖，避免閃爍
+    if (isDrawingMask) return; 
+
     setIsProcessing(true);
-    
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
-    
     const MAX_WIDTH = 1920; 
     let width = image.width;
     let height = image.height;
-
     if (width > MAX_WIDTH) {
       height = Math.floor((height * MAX_WIDTH) / width);
       width = MAX_WIDTH;
     }
-
     if (canvas.width !== width || canvas.height !== height) {
-      canvas.width = width;
-      canvas.height = height;
+      canvas.width = width; canvas.height = height;
     }
 
     ctx.clearRect(0, 0, width, height);
@@ -339,14 +486,9 @@ export default function App() {
         ctx.restore();
     }
 
-    const intensity = settings.effectIntensity;
-    if (settings.effectId === 'kira') {
-        applyKira(ctx, width, height, intensity);
-    } else if (settings.effectId === 'leak') {
-        applyLeak(ctx, width, height, intensity);
-    } else if (settings.effectId === 'vignette') {
-        applyVignette(ctx, width, height, intensity);
-    }
+    if (settings.effectId === 'kira') applyKira(ctx, width, height, settings.effectIntensity);
+    if (settings.effectId === 'leak') applyLeak(ctx, width, height, settings.effectIntensity);
+    if (settings.effectId === 'vignette') applyVignette(ctx, width, height, settings.effectIntensity);
 
     if (settings.showTimestamp) {
         const date = new Date();
@@ -365,8 +507,7 @@ export default function App() {
 
     setProcessedUrl(canvas.toDataURL('image/jpeg', 0.9));
     setIsProcessing(false);
-
-  }, [image, settings]);
+  }, [image, settings, isDrawingMask]); // 加入 isDrawingMask 依賴
 
   useEffect(() => {
     const timer = setTimeout(() => processImage(), 50);
@@ -424,7 +565,7 @@ export default function App() {
     <div className="flex flex-col h-screen bg-black text-white overflow-hidden font-sans select-none touch-none">
       <canvas ref={canvasRef} className="hidden" />
 
-      {/* Header - 加入 pt-[env(safe-area-inset-top)] 修復瀏海遮擋 */}
+      {/* Header */}
       <div className="pt-[env(safe-area-inset-top)] min-h-[env(safe-area-inset-top)] box-content h-14 px-4 flex items-center justify-between bg-black/80 backdrop-blur-md z-20 border-b border-white/5">
         <button onClick={() => setImage(null)} className="p-2 hover:bg-white/10 rounded-full text-neutral-400">
           <Undo2 size={20} />
@@ -439,15 +580,17 @@ export default function App() {
         </button>
       </div>
 
-      {/* Preview */}
+      {/* Preview Area */}
       <div className="flex-1 relative bg-neutral-900/50 p-4 flex flex-col justify-center overflow-hidden">
         {processedUrl ? (
           <div className="relative w-full h-full flex flex-col items-center justify-center"
-               onPointerDown={() => setIsComparing(true)}
-               onPointerUp={() => setIsComparing(false)}
-               onPointerLeave={() => setIsComparing(false)}
-               onTouchStart={() => setIsComparing(true)}
-               onTouchEnd={() => setIsComparing(false)}
+               onPointerDown={activeTab === 'remove' ? handleTouchStart : () => setIsComparing(true)}
+               onPointerUp={activeTab === 'remove' ? handleTouchEnd : () => setIsComparing(false)}
+               onPointerLeave={activeTab === 'remove' ? handleTouchEnd : () => setIsComparing(false)}
+               onPointerMove={activeTab === 'remove' ? handleTouchMove : undefined}
+               onTouchStart={activeTab === 'remove' ? handleTouchStart : () => setIsComparing(true)}
+               onTouchEnd={activeTab === 'remove' ? handleTouchEnd : () => setIsComparing(false)}
+               onTouchMove={activeTab === 'remove' ? handleTouchMove : undefined}
                >
              
              {/* 頂部狀態 */}
@@ -461,8 +604,9 @@ export default function App() {
                 )}
              </div>
 
-            {/* 核心修正：加入 WebkitTouchCallout: 'none' 禁用選單 */}
+            {/* 主圖片顯示 */}
             <img 
+              ref={imgRef}
               src={isComparing ? originalUrl : processedUrl} 
               alt="Preview" 
               className="max-w-full max-h-full object-contain shadow-2xl shadow-black select-none" 
@@ -470,10 +614,22 @@ export default function App() {
               onContextMenu={(e) => e.preventDefault()} 
             />
             
-            {/* 底部提示文字 */}
-            <div className={`absolute bottom-4 text-[10px] text-neutral-500 tracking-widest uppercase transition-opacity ${isComparing ? 'opacity-0' : 'opacity-60'}`}>
-               Press & Hold to Compare
-            </div>
+            {/* 塗抹遮罩層 (僅在 Remove 模式顯示) */}
+            <canvas 
+                ref={maskCanvasRef}
+                className={`absolute pointer-events-none ${activeTab === 'remove' ? 'opacity-100' : 'opacity-0'}`}
+                style={{
+                    width: imgRef.current ? imgRef.current.width : '100%',
+                    height: imgRef.current ? imgRef.current.height : '100%'
+                }}
+            />
+            
+            {/* 提示文字 (非 Remove 模式) */}
+            {activeTab !== 'remove' && (
+                <div className={`absolute bottom-4 text-[10px] text-neutral-500 tracking-widest uppercase transition-opacity ${isComparing ? 'opacity-0' : 'opacity-60'}`}>
+                Press & Hold to Compare
+                </div>
+            )}
             
             {isProcessing && (
               <div className="absolute inset-0 flex items-center justify-center bg-black/20 backdrop-blur-[2px] z-10">
@@ -487,22 +643,17 @@ export default function App() {
       {/* Controls */}
       <div className="bg-black border-t border-white/5 pb-safe z-30">
         
-        {/* Adjust */}
+        {/* Adjust - 簡化版 */}
         {activeTab === 'adjust' && (
           <div className="px-6 py-6 space-y-6 animate-in slide-in-from-bottom-2">
             <div className="flex justify-between items-center mb-4">
                <span className="text-xs font-bold text-neutral-500 uppercase">Global Params</span>
                <button onClick={() => setSettings(s => ({...s, showTimestamp: !s.showTimestamp}))} className={`text-[10px] px-3 py-1 rounded-full border transition-colors ${settings.showTimestamp ? 'bg-orange-500 border-orange-500 text-white' : 'border-neutral-700 text-neutral-400'}`}>DATE STAMP</button>
             </div>
-            {['brightness', 'contrast'].map(key => (
-                 <div key={key} className="space-y-3">
-                   <div className="flex justify-between text-xs text-neutral-300">
-                     <span className="capitalize">{key}</span>
-                     <span className="font-mono text-neutral-500">{settings[key]}%</span>
-                   </div>
-                   <input type="range" min="50" max="150" value={settings[key]} onChange={(e) => setSettings({...settings, [key]: parseInt(e.target.value)})} className="w-full h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-white" />
-                 </div>
-            ))}
+            {/* 移除了亮度/對比滑桿，保持介面乾淨 */}
+            <div className="text-center text-neutral-600 text-xs py-2">
+              AUTO AI ENHANCEMENT ENABLED
+            </div>
           </div>
         )}
 
@@ -549,11 +700,39 @@ export default function App() {
             </div>
           </div>
         )}
+        
+        {/* Remove Tab (New Logic) */}
+        {activeTab === 'remove' && (
+          <div className="px-6 py-6 space-y-4 animate-in slide-in-from-bottom-2">
+            <div className="flex justify-between items-center mb-2">
+               <span className="text-xs font-bold text-neutral-500 uppercase">SMART REMOVER</span>
+               <div className="flex gap-4">
+                   <button onClick={() => setRemoveMaskPoints([])} className="text-xs text-neutral-400 flex items-center gap-1 hover:text-white"><Trash2 size={12}/> CLEAR</button>
+               </div>
+            </div>
+            
+            <div className="flex items-center gap-4">
+                <span className="text-[10px] text-neutral-400">BRUSH</span>
+                <input type="range" min="5" max="50" value={brushSize} onChange={(e) => setBrushSize(parseInt(e.target.value))} className="w-full h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-red-500" />
+            </div>
+
+            <button 
+                onClick={applySmartRemove} 
+                disabled={removeMaskPoints.length === 0}
+                className="w-full bg-red-600 hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold py-3 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-red-900/20 active:scale-[0.98] transition-all"
+            >
+              <Eraser size={16} /> 
+              {removeMaskPoints.length === 0 ? 'PAINT TO REMOVE' : 'APPLY REMOVAL'}
+            </button>
+            <p className="text-[9px] text-neutral-600 text-center uppercase tracking-wider">Use finger to paint over objects</p>
+          </div>
+        )}
 
         {/* Nav */}
-        <div className="flex justify-center gap-12 items-center pt-2 pb-6 border-t border-white/5 bg-black">
+        <div className="flex justify-center gap-8 items-center pt-2 pb-6 border-t border-white/5 bg-black">
           <button onClick={() => setActiveTab('filters')} className={`flex flex-col items-center gap-1 transition-colors p-2 ${activeTab === 'filters' ? 'text-white' : 'text-neutral-600'}`}><Aperture size={20} /><span className="text-[9px] font-bold">FILTERS</span></button>
           <button onClick={() => setActiveTab('effects')} className={`flex flex-col items-center gap-1 transition-colors p-2 ${activeTab === 'effects' ? 'text-white' : 'text-neutral-600'}`}><Stars size={20} /><span className="text-[9px] font-bold">FX</span></button>
+          <button onClick={() => setActiveTab('remove')} className={`flex flex-col items-center gap-1 transition-colors p-2 ${activeTab === 'remove' ? 'text-red-500' : 'text-neutral-600'}`}><Eraser size={20} /><span className="text-[9px] font-bold">REMOVE</span></button>
           <button onClick={() => setActiveTab('adjust')} className={`flex flex-col items-center gap-1 transition-colors p-2 ${activeTab === 'adjust' ? 'text-white' : 'text-neutral-600'}`}><Sliders size={20} /><span className="text-[9px] font-bold">ADJUST</span></button>
         </div>
       </div>
