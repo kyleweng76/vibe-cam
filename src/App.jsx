@@ -101,7 +101,7 @@ export default function App() {
   
   const [settings, setSettings] = useState({
     // 美顏參數
-    beautyLevel: 0, // 0-100, 預設 0 (關閉)
+    beautyLevel: 0, // 0-100 (磨皮)
     skinTone: 0,    // 0-100 (美白)
     
     // 全局參數
@@ -172,6 +172,7 @@ export default function App() {
     }
   };
 
+  // ... (特效函數保持不變: applyKira, applyLeak, applyVignette) ...
   const applyKira = (ctx, width, height, intensity) => {
     const sampleScale = 0.2; 
     const sw = Math.floor(width * sampleScale);
@@ -255,17 +256,18 @@ export default function App() {
     setTimeout(() => setAiAnalysisResult(''), 3000);
   };
 
-  // 一鍵美顏設定 (Auto Mode)
+  // 一鍵美顏設定 (Auto Mode) - 增強參數
   const applyInstantBeauty = () => {
     setSettings(prev => ({
         ...prev,
-        beautyLevel: 60, // 自然磨皮強度
-        skinTone: 30,    // 微微提亮
+        beautyLevel: 75, // 提高預設強度，確保有感
+        skinTone: 40,    
     }));
-    setAiAnalysisResult("✨ AI 智慧美膚已套用");
+    setAiAnalysisResult("✨ AI 智慧磨皮已套用");
     setTimeout(() => setAiAnalysisResult(''), 2000);
   }
 
+  // 核心渲染 - 升級版美顏演算法
   const processImage = useCallback(() => {
     if (!image || !canvasRef.current) return;
 
@@ -285,46 +287,64 @@ export default function App() {
 
     ctx.clearRect(0, 0, width, height);
     
-    // 1. 繪製底圖
+    // 1. 繪製底圖 (Original)
     ctx.drawImage(image, 0, 0, width, height);
 
     // ==========================================
-    // 💄 AI 美顏處理 (Natural Skin Smoothing)
+    // 💄 AI 美顏處理 (Dual-Pass Frequency Smoothing)
     // ==========================================
     if (settings.beautyLevel > 0) {
-        // 我們使用「堆疊法」模擬磨皮，這比複雜的算法快且自然
-        const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = width;
-        tempCanvas.height = height;
-        const tCtx = tempCanvas.getContext('2d');
-        tCtx.drawImage(canvas, 0, 0);
+        // 準備一個模糊的圖層 (Base Layer)
+        // 增加模糊半徑，讓皮膚更平滑
+        const blurRadius = Math.max(3, settings.beautyLevel / 3.5); 
+        
+        const blurCanvas = document.createElement('canvas');
+        blurCanvas.width = width;
+        blurCanvas.height = height;
+        const bCtx = blurCanvas.getContext('2d');
+        
+        // 為了效能，我們可以先繪製底圖，然後應用 filter
+        bCtx.drawImage(canvas, 0, 0); 
+        // 使用 CSS Filter 在 Canvas 上進行模糊 (這比 JS 迴圈快)
+        // 注意：為了正確應用模糊，我們需要在繪製時應用 filter，或者對畫布進行處理
+        // 這裡我們用一個簡單的方法：清除重畫
+        bCtx.clearRect(0, 0, width, height);
+        bCtx.filter = `blur(${blurRadius}px)`;
+        bCtx.drawImage(canvas, 0, 0); // 畫入原圖並模糊
+        bCtx.filter = 'none';
 
-        // A. 磨皮與去斑 (Heal)
-        // 原理：使用 lighten 模式疊加模糊層，可以「吃掉」比周圍暗的像素 (如痘痘、斑點)
-        // 但保留比周圍亮的細節 (如眼神光)
+        // 步驟 1: 亮部抑制 (Flatten Highlights/Bumps)
+        // 使用 darken 模式疊加模糊層，可以消除皮膚上的細微凸起和油光 (雜點)
         ctx.save();
-        const blurAmount = Math.max(2, settings.beautyLevel / 5); // 動態模糊量
-        ctx.filter = `blur(${blurAmount}px)`;
-        ctx.globalCompositeOperation = 'lighten'; // 關鍵混合模式
-        ctx.globalAlpha = settings.beautyLevel / 100 * 0.6; // 強度控制
-        ctx.drawImage(tempCanvas, 0, 0);
+        ctx.globalCompositeOperation = 'darken';
+        // 係數設為 0.5 左右，太高會讓畫面變髒，太低沒效果
+        ctx.globalAlpha = (settings.beautyLevel / 100) * 0.5; 
+        ctx.drawImage(blurCanvas, 0, 0);
         ctx.restore();
 
-        // B. 柔膚與均勻膚色 (Soft Skin)
-        // 原理：使用 screen 模式疊加一層微模糊層，讓皮膚看起來有光澤
+        // 步驟 2: 暗部補償 (Fill Pores/Spots)
+        // 使用 lighten 模式疊加模糊層，消除毛孔和黑斑 (雜點)
         ctx.save();
-        ctx.filter = `blur(${blurAmount * 2}px)`; 
-        ctx.globalCompositeOperation = 'screen'; 
-        ctx.globalAlpha = settings.beautyLevel / 100 * 0.3; // 淡淡的光澤
-        ctx.drawImage(tempCanvas, 0, 0);
+        ctx.globalCompositeOperation = 'lighten';
+        ctx.globalAlpha = (settings.beautyLevel / 100) * 0.6; // 稍微強一點
+        ctx.drawImage(blurCanvas, 0, 0);
+        ctx.restore();
+        
+        // 步驟 3: 柔焦融合 (Soft Glow)
+        // 最後加一層淡淡的 overlay，讓整體光影過渡更自然，減少「修圖痕跡」
+        ctx.save();
+        ctx.globalCompositeOperation = 'overlay';
+        ctx.globalAlpha = (settings.beautyLevel / 100) * 0.15;
+        ctx.drawImage(blurCanvas, 0, 0);
         ctx.restore();
     }
 
     // C. 美白 (Skin Brightening)
     if (settings.skinTone > 0) {
         ctx.save();
-        ctx.globalCompositeOperation = 'soft-light'; // 柔光模式適合提亮膚色
-        ctx.fillStyle = `rgba(255, 230, 220, ${settings.skinTone / 100 * 0.4})`; // 暖白膚色
+        // 改用 soft-light + 白色，效果更像粉底液，比較自然白
+        ctx.globalCompositeOperation = 'soft-light'; 
+        ctx.fillStyle = `rgba(255, 245, 240, ${settings.skinTone / 100 * 0.5})`; 
         ctx.fillRect(0, 0, width, height);
         ctx.restore();
     }
@@ -503,7 +523,7 @@ export default function App() {
           <div className="px-6 py-6 space-y-6 animate-in slide-in-from-bottom-2">
             <div className="flex justify-between items-center mb-4">
                <span className="text-xs font-bold text-neutral-500 uppercase">Natural Retouch</span>
-               <button onClick={applyInstantBeauty} className="flex items-center gap-1 text-[10px] px-3 py-1 rounded-full border border-orange-500 text-orange-500 hover:bg-orange-500 hover:text-white transition-all">
+               <button onClick={applyInstantBeauty} className="flex items-center gap-1 text-[10px] px-3 py-1 rounded-full border border-orange-500 text-orange-500 hover:bg-orange-500 hover:text-white transition-all active:scale-95">
                  <Sparkles size={10} /> ONE-TAP FIX
                </button>
             </div>
