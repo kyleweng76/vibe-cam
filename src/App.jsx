@@ -482,19 +482,29 @@ export default function App() {
     <div className="flex flex-col h-screen bg-black text-white overflow-hidden font-sans select-none touch-none">
       <canvas ref={canvasRef} className="hidden" />
 
-      {/* Header */}
-      <div className="pt-[env(safe-area-inset-top)] min-h-[env(safe-area-inset-top)] box-content h-14 px-4 flex items-center justify-between bg-black/80 backdrop-blur-md z-20 border-b border-white/5">
-        <button onClick={() => setImage(null)} className="p-2 hover:bg-white/10 rounded-full text-neutral-400">
-          <Undo2 size={20} />
-        </button>
-        <div className="flex items-center gap-2">
+      {/* Header (Grid Layout for Perfect Centering) */}
+      <div className="pt-[env(safe-area-inset-top)] min-h-[env(safe-area-inset-top)] box-content h-14 px-4 grid grid-cols-3 items-center bg-black/80 backdrop-blur-md z-20 border-b border-white/5">
+        
+        {/* Left: Undo */}
+        <div className="flex justify-start">
+          <button onClick={() => setImage(null)} className="p-2 hover:bg-white/10 rounded-full text-neutral-400">
+            <Undo2 size={20} />
+          </button>
+        </div>
+
+        {/* Center: Logo */}
+        <div className="flex justify-center items-center gap-2">
            <VibeLogo className="w-6 h-6" />
            <span className="font-black italic text-lg tracking-tighter bg-gradient-to-r from-orange-500 to-pink-500 bg-clip-text text-transparent">VIBE</span>
         </div>
-        <button onClick={handleSave} className="bg-white text-black px-5 py-1.5 rounded-full text-xs font-bold tracking-wide flex items-center gap-2 active:scale-95 transition-transform">
-          {navigator.share ? <Share size={14} /> : <Download size={14} />}
-          {navigator.share ? 'SHARE' : 'SAVE'}
-        </button>
+
+        {/* Right: Save */}
+        <div className="flex justify-end">
+          <button onClick={handleSave} className="bg-white text-black px-5 py-1.5 rounded-full text-xs font-bold tracking-wide flex items-center gap-2 active:scale-95 transition-transform">
+            {navigator.share ? <Share size={14} /> : <Download size={14} />}
+            {navigator.share ? 'SHARE' : 'SAVE'}
+          </button>
+        </div>
       </div>
 
       {/* Preview Area */}
